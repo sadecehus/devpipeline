@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/state.schema.json",
+  "title": "DevPipeline persistent state",
+  "description": "Project-level state.json; per-run manifest.json uses $defs.run.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_id",
+    "framework_version",
+    "runs"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "run": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "mode",
+        "phase",
+        "original_request",
+        "framework_version",
+        "started_at",
+        "counters",
+        "tasks",
+        "phase_history"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "pattern": "^run-[0-9]{8}-[0-9]{6}-[a-f0-9]{6}$"
+        },
+        "mode": {
+          "enum": [
+            "build",
+            "improve",
+            "audit",
+            "repair"
+          ]
+        },
+        "project_mode": {
+          "enum": [
+            "new",
+            "existing"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "INITIALIZING",
+            "ANALYZING",
+            "PLANNING",
+            "AWAITING_APPROVAL",
+            "DESIGNING",
+            "DEVELOPING",
+            "INTEGRATING",
+            "TESTING",
+            "REVIEWING",
+            "REPAIRING",
+            "DOCUMENTING",
+            "COMPLETED",
+            "BLOCKED",
+            "NEEDS_HUMAN_REVIEW",
+            "BUDGET_EXHAUSTED",
+            "CANCELLED",
+            "FAILED"
+          ]
+        },
+        "original_request": {
+          "type": "string"
+        },
+        "framework_version": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "$ref": "config.schema.json"
+        },
+        "phase_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "at"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "completed_steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "counters": {
+          "type": "object",
+          "required": [
+            "agent_calls",
+            "operator_calls",
+            "repair_iterations"
+          ],
+          "properties": {
+            "agent_calls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "operator_calls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "repair_iterations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "no_progress_iterations": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "tasks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "status",
+              "attempt"
+            ],
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "attempt": {
+                "type": "integer"
+              },
+              "agent": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "selected_agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "agent",
+              "reason"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "mandatory": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "source": {
+          "type": "object"
+        },
+        "gate_results": {
+          "type": "array"
+        },
+        "issue_history": {
+          "type": "object"
+        },
+        "open_issues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resolved_issues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "approvals": {
+          "type": "array"
+        },
+        "final_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "project_dir": {
+      "type": "string"
+    },
+    "framework_version": {
+      "type": "string"
+    },
+    "current_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "mode",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

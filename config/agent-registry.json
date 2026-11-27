@@ -1,0 +1,242 @@
+{
+  "description": "Single source of truth for agent activation and issue routing. 'lock': an agent activated by a rule cannot be disabled by the architect or by config (e.g. AI evaluation for AI projects).",
+  "implementation_roles": [
+    "implementation"
+  ],
+  "agents": {
+    "orchestrator": {
+      "category": "orchestration",
+      "role": "advisor",
+      "activation": {
+        "on_demand": true
+      },
+      "description": "Planning assistance, classification, recovery analysis, ambiguous routing."
+    },
+    "product-analyst": {
+      "category": "planning",
+      "role": "planning",
+      "activation": {
+        "always": true
+      },
+      "lock": true
+    },
+    "software-architect": {
+      "category": "architecture",
+      "role": "planning",
+      "activation": {
+        "always": true
+      },
+      "lock": true
+    },
+    "ui-ux-designer": {
+      "category": "design",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "frontend",
+          "mobile",
+          "browser_ui"
+        ]
+      }
+    },
+    "frontend-engineer": {
+      "category": "implementation",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "frontend"
+        ]
+      }
+    },
+    "backend-engineer": {
+      "category": "implementation",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "backend"
+        ]
+      }
+    },
+    "database-engineer": {
+      "category": "implementation",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "database"
+        ]
+      }
+    },
+    "ai-engineer": {
+      "category": "implementation",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "ai",
+          "rag"
+        ]
+      },
+      "lock": true
+    },
+    "mobile-engineer": {
+      "category": "implementation",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "mobile"
+        ]
+      }
+    },
+    "devops-engineer": {
+      "category": "implementation",
+      "role": "implementation",
+      "activation": {
+        "any_feature": [
+          "devops"
+        ]
+      }
+    },
+    "integration-engineer": {
+      "category": "integration",
+      "role": "integration",
+      "activation": {
+        "min_implementation_agents": 1
+      },
+      "lock": true
+    },
+    "browser-qa-engineer": {
+      "category": "testing",
+      "role": "qa",
+      "activation": {
+        "any_feature": [
+          "frontend",
+          "browser_ui"
+        ]
+      },
+      "lock": true,
+      "report_kind": "browser_qa"
+    },
+    "code-qa-engineer": {
+      "category": "testing",
+      "role": "qa",
+      "activation": {
+        "min_implementation_agents": 1
+      },
+      "lock": true,
+      "report_kind": "code_qa"
+    },
+    "security-engineer": {
+      "category": "testing",
+      "role": "qa",
+      "activation": {
+        "profiles": [
+          "balanced",
+          "strict"
+        ],
+        "any_feature": [
+          "authentication",
+          "payments",
+          "ai"
+        ]
+      },
+      "lock": true,
+      "report_kind": "security"
+    },
+    "ai-evaluation-engineer": {
+      "category": "testing",
+      "role": "qa",
+      "activation": {
+        "any_feature": [
+          "ai",
+          "rag"
+        ],
+        "requires_agent": "ai-engineer"
+      },
+      "lock": true,
+      "report_kind": "ai_eval"
+    },
+    "performance-engineer": {
+      "category": "testing",
+      "role": "qa",
+      "activation": {
+        "any_feature": [
+          "performance_requirements"
+        ],
+        "profiles": [
+          "strict"
+        ]
+      },
+      "report_kind": "performance"
+    },
+    "code-reviewer": {
+      "category": "review",
+      "role": "review",
+      "activation": {
+        "profiles": [
+          "balanced",
+          "strict"
+        ]
+      },
+      "lock": true
+    },
+    "technical-writer": {
+      "category": "documentation",
+      "role": "documentation",
+      "activation": {
+        "always": true
+      },
+      "lock": true
+    },
+    "final-reviewer": {
+      "category": "final_review",
+      "role": "review",
+      "activation": {
+        "always": true
+      },
+      "lock": true
+    },
+    "pipeline-operator": {
+      "category": "operator",
+      "role": "internal",
+      "activation": {
+        "internal": true
+      }
+    }
+  },
+  "routing": {
+    "visual": "ui-ux-designer",
+    "accessibility": "frontend-engineer",
+    "functional": "frontend-engineer",
+    "api": "backend-engineer",
+    "contract": "software-architect",
+    "database": "database-engineer",
+    "ai_quality": "ai-engineer",
+    "ai_security": "ai-engineer",
+    "security": "$owner",
+    "performance": "$owner",
+    "integration": "integration-engineer",
+    "infrastructure": "devops-engineer",
+    "build": "$owner",
+    "test": "$owner",
+    "documentation": "technical-writer",
+    "code_quality": "$owner",
+    "requirements": "software-architect"
+  },
+  "routing_fallbacks": {
+    "ui-ux-designer": "frontend-engineer",
+    "devops-engineer": "backend-engineer",
+    "database-engineer": "backend-engineer",
+    "frontend-engineer": "backend-engineer",
+    "backend-engineer": "frontend-engineer"
+  },
+  "repairable_agents": [
+    "ui-ux-designer",
+    "frontend-engineer",
+    "backend-engineer",
+    "database-engineer",
+    "ai-engineer",
+    "mobile-engineer",
+    "devops-engineer",
+    "integration-engineer",
+    "technical-writer"
+  ]
+}

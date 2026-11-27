@@ -1,0 +1,3 @@
+{"kind": "final_review", "agent": "final-reviewer", "approved": false, "status": "REPAIR_REQUIRED", "source_fingerprint": "abc",
+ "requirements_total": 10, "requirements_verified": 8, "missing_requirements": ["REQ-004", "REQ-009"],
+ "blocking_issues": [], "non_blocking_issues": [], "required_repairs": [], "evidence": [], "summary": ""}

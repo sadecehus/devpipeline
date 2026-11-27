@@ -1,0 +1,26 @@
+{
+  "profile": "balanced",
+  "description": "Baseline configuration. Profiles and project overrides are merged on top (later wins).",
+  "max_parallel_agents": 3,
+  "max_agent_calls": 80,
+  "max_operator_calls": 200,
+  "max_repair_iterations": 5,
+  "max_task_retries": 2,
+  "max_no_progress_iterations": 2,
+  "max_output_tokens": null,
+  "max_runtime_minutes": null,
+  "require_plan_approval": false,
+  "auto_accept_assumptions": true,
+  "block_on_preexisting_failures": false,
+  "check_timeout_seconds": 900,
+  "model_routing": {},
+  "effort_routing": {},
+  "gates": {},
+  "agents": {},
+  "live_ai_evaluation": "optional",
+  "viewports": [
+    "390x844",
+    "768x1024",
+    "1440x900"
+  ]
+}

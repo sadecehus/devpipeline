@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/test-report.schema.json",
+  "title": "Test / QA report",
+  "type": "object",
+  "required": [
+    "run_id",
+    "agent",
+    "kind",
+    "status",
+    "checks",
+    "issues",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "kind": {
+      "enum": [
+        "checks",
+        "code_qa",
+        "browser_qa",
+        "security",
+        "ai_eval",
+        "performance",
+        "baseline"
+      ]
+    },
+    "source_fingerprint": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "SKIPPED",
+        "NOT_RUN",
+        "BLOCKED",
+        "ERROR",
+        "NOT_APPLICABLE"
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "SKIPPED",
+              "NOT_RUN",
+              "BLOCKED",
+              "ERROR",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "mandatory": {
+            "type": "boolean"
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^REQ-[0-9]{3,}$"
+            }
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^AC-[0-9]{3,}$"
+            }
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "ended_at": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source_fingerprint": {
+            "type": "string"
+          },
+          "tests_total": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tests_passed": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tests_failed": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tests_skipped": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "log_path": {
+            "type": "string"
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expected": {
+            "type": "string"
+          },
+          "actual": {
+            "type": "string"
+          },
+          "reproduction_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_type": {
+            "enum": [
+              "executed",
+              "observed",
+              "static_analysis",
+              "llm_judgment",
+              "mock"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "issue.schema.json"
+      }
+    },
+    "scanners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "available",
+          "ran"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "ran": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "SKIPPED",
+              "NOT_RUN",
+              "BLOCKED",
+              "ERROR",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "viewports": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "thresholds": {
+      "type": "object"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    }
+  }
+}

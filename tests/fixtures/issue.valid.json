@@ -1,0 +1,4 @@
+{"id": "ISSUE-001", "source_agent": "browser-qa-engineer", "assigned_agent": "frontend-engineer", "severity": "high", "category": "functional",
+ "requirement_ids": ["REQ-001"], "description": "Login form does not submit valid credentials.", "affected_files": [],
+ "expected_behavior": "Valid credentials authenticate the user.", "actual_behavior": "Form submission produces an error.",
+ "reproduction_steps": [], "evidence": [], "blocking": true, "status": "OPEN", "attempts": 0}

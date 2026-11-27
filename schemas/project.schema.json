@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/project.schema.json",
+  "title": "Project-level DevPipeline config (.devpipeline/config.json)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_id",
+    "project_name"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "project_name": {
+      "type": "string"
+    },
+    "created_by_devpipeline": {
+      "type": "boolean"
+    },
+    "profile": {
+      "enum": [
+        "fast",
+        "balanced",
+        "strict"
+      ]
+    },
+    "language": {
+      "enum": [
+        "en",
+        "tr"
+      ]
+    },
+    "stack_preferences": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "overrides": {
+      "type": "object"
+    },
+    "protected_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "qa_write_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "integrations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "approved_environments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

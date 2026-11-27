@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/architecture.schema.json",
+  "title": "Architecture specification",
+  "type": "object",
+  "required": [
+    "project_type",
+    "stack",
+    "features",
+    "components",
+    "ownership",
+    "required_agents",
+    "test_strategy",
+    "adrs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "project_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "style": {
+      "type": "string"
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "frontend": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "boolean"
+        },
+        "database": {
+          "type": "boolean"
+        },
+        "ai": {
+          "type": "boolean"
+        },
+        "rag": {
+          "type": "boolean"
+        },
+        "mobile": {
+          "type": "boolean"
+        },
+        "devops": {
+          "type": "boolean"
+        },
+        "browser_ui": {
+          "type": "boolean"
+        },
+        "performance_requirements": {
+          "type": "boolean"
+        },
+        "documentation": {
+          "type": "boolean"
+        },
+        "authentication": {
+          "type": "boolean"
+        },
+        "payments": {
+          "type": "boolean"
+        },
+        "external_messaging": {
+          "type": "boolean"
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "responsibility",
+          "paths",
+          "owner_agent"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "responsibility": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "owner_agent": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          }
+        }
+      }
+    },
+    "api_contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "openapi",
+              "graphql",
+              "grpc",
+              "json-schema",
+              "typescript-types",
+              "python-types",
+              "event",
+              "function"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "data_models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "env_vars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "secret"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "example": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ownership": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "agent",
+          "paths"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "required_agents": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "uniqueItems": true
+    },
+    "agent_rationale": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "test_strategy": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "command"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9:_-]*$"
+          },
+          "kind": {
+            "enum": [
+              "install",
+              "lint",
+              "typecheck",
+              "build",
+              "unit",
+              "integration",
+              "api",
+              "contract",
+              "e2e",
+              "accessibility",
+              "security",
+              "ai_eval",
+              "performance",
+              "custom"
+            ]
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "mandatory": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "app_start": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "healthcheck": {
+          "type": "string"
+        }
+      }
+    },
+    "adrs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "security_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ai_architecture": {
+      "type": "object"
+    },
+    "stack_change_justification": {
+      "type": "string"
+    }
+  }
+}

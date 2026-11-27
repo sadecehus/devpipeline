@@ -1,0 +1,4 @@
+{"run_id": "run-001", "task_id": "TASK-005", "agent": "frontend-engineer", "status": "COMPLETED", "requirements": ["REQ-001"],
+ "changed_files": ["frontend/src/features/auth/LoginForm.tsx"], "artifacts": [],
+ "validation": [{"name": "frontend-typecheck", "status": "PASS", "exit_code": 0, "evidence_path": "artifacts/typecheck.log"}],
+ "issues": [], "summary": "Authentication interface implemented."}

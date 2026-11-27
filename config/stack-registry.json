@@ -1,0 +1,226 @@
+{
+  "description": "Stack detection and validation command discovery. Commands are only run when the manifest/script/tool exists.",
+  "search_depth": 2,
+  "ignore_dirs": [
+    "node_modules",
+    ".git",
+    ".devpipeline",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    ".next",
+    "target",
+    "bin",
+    "obj",
+    "__pycache__",
+    ".turbo"
+  ],
+  "allowed_executables": [
+    "npm",
+    "pnpm",
+    "yarn",
+    "bun",
+    "npx",
+    "node",
+    "python3",
+    "python",
+    "pytest",
+    "uv",
+    "ruff",
+    "mypy",
+    "pyright",
+    "bandit",
+    "pip-audit",
+    "mvn",
+    "./mvnw",
+    "gradle",
+    "./gradlew",
+    "dotnet",
+    "go",
+    "cargo",
+    "make",
+    "docker",
+    "semgrep",
+    "gitleaks",
+    "trivy",
+    "osv-scanner",
+    "k6"
+  ],
+  "stacks": {
+    "node": {
+      "detect": [
+        "package.json"
+      ],
+      "package_managers": [
+        {
+          "lockfile": "pnpm-lock.yaml",
+          "pm": "pnpm",
+          "install": "pnpm install --frozen-lockfile"
+        },
+        {
+          "lockfile": "yarn.lock",
+          "pm": "yarn",
+          "install": "yarn install --frozen-lockfile"
+        },
+        {
+          "lockfile": "bun.lockb",
+          "pm": "bun",
+          "install": "bun install --frozen-lockfile"
+        },
+        {
+          "lockfile": "package-lock.json",
+          "pm": "npm",
+          "install": "npm ci"
+        }
+      ],
+      "scripts": {
+        "lint": [
+          "lint"
+        ],
+        "typecheck": [
+          "typecheck",
+          "type-check",
+          "check-types"
+        ],
+        "build": [
+          "build"
+        ],
+        "unit": [
+          "test:unit",
+          "test"
+        ],
+        "integration": [
+          "test:integration"
+        ],
+        "api": [
+          "test:api"
+        ],
+        "contract": [
+          "test:contract"
+        ],
+        "e2e": [
+          "test:e2e",
+          "e2e"
+        ],
+        "accessibility": [
+          "test:a11y",
+          "a11y"
+        ]
+      },
+      "run": "{pm} run {script}",
+      "tsc_fallback": "npx --no-install tsc --noEmit",
+      "dependency_audit": {
+        "npm": "npm audit --audit-level=high",
+        "pnpm": "pnpm audit --audit-level high"
+      }
+    },
+    "python": {
+      "detect": [
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.py"
+      ],
+      "tools": {
+        "lint": [
+          {
+            "needs": "ruff",
+            "cmd": "ruff check ."
+          },
+          {
+            "needs_uv_dep": "ruff",
+            "cmd": "uv run ruff check ."
+          }
+        ],
+        "typecheck": [
+          {
+            "needs_config": "mypy",
+            "cmd": "mypy ."
+          },
+          {
+            "needs_uv_dep": "mypy",
+            "cmd": "uv run mypy ."
+          }
+        ],
+        "unit": [
+          {
+            "needs_uv_dep": "pytest",
+            "cmd": "uv run pytest -q -rs"
+          },
+          {
+            "needs_module": "pytest",
+            "cmd": "python3 -m pytest -q -rs"
+          }
+        ]
+      },
+      "install": [
+        {
+          "needs_file": "uv.lock",
+          "cmd": "uv sync --frozen"
+        }
+      ],
+      "dependency_audit": [
+        {
+          "needs": "pip-audit",
+          "cmd": "pip-audit"
+        }
+      ]
+    },
+    "maven": {
+      "detect": [
+        "pom.xml"
+      ],
+      "commands": {
+        "build": "mvn -q -B -DskipTests package",
+        "unit": "mvn -q -B test"
+      }
+    },
+    "gradle": {
+      "detect": [
+        "build.gradle",
+        "build.gradle.kts"
+      ],
+      "commands": {
+        "build": "./gradlew build -x test",
+        "unit": "./gradlew test"
+      }
+    },
+    "dotnet": {
+      "detect_glob": [
+        "*.sln",
+        "*.csproj"
+      ],
+      "commands": {
+        "install": "dotnet restore",
+        "build": "dotnet build --no-restore",
+        "unit": "dotnet test --no-build"
+      }
+    },
+    "go": {
+      "detect": [
+        "go.mod"
+      ],
+      "commands": {
+        "lint": "go vet ./...",
+        "build": "go build ./...",
+        "unit": "go test ./..."
+      }
+    }
+  },
+  "check_kinds": [
+    "install",
+    "lint",
+    "typecheck",
+    "build",
+    "unit",
+    "integration",
+    "api",
+    "contract",
+    "e2e",
+    "accessibility",
+    "security",
+    "ai_eval",
+    "performance",
+    "custom"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Example A — full-stack CRUD app. Run: /devpipeline:build-project $(cat examples/fullstack-todo/request.md) --dir ./todo-app",
+  "features": {"frontend": true, "backend": true, "database": true, "browser_ui": true},
+  "profile": "balanced",
+  "expected_agents": ["product-analyst", "software-architect", "ui-ux-designer", "frontend-engineer", "backend-engineer", "database-engineer", "integration-engineer", "browser-qa-engineer", "code-qa-engineer", "security-engineer", "code-reviewer", "technical-writer", "final-reviewer"],
+  "excluded_agents": ["ai-engineer", "ai-evaluation-engineer", "mobile-engineer"],
+  "mandatory_gates": ["unit_tests", "e2e_tests", "browser_qa", "security_review", "code_review", "final_review", "documentation"]
+}

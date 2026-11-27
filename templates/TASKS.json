@@ -1,0 +1,35 @@
+{
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "agent": "software-architect",
+      "title": "Define API contract and shared types",
+      "kind": "contract",
+      "description": "Write .devpipeline/contracts/openapi.yaml and shared type definitions.",
+      "requirements": ["REQ-001"],
+      "dependencies": [],
+      "owned_paths": [],
+      "expected_artifacts": [".devpipeline/contracts/openapi.yaml"],
+      "acceptance_criteria": [],
+      "validation_commands": [],
+      "status": "PENDING",
+      "attempt": 0
+    },
+    {
+      "id": "TASK-002",
+      "agent": "backend-engineer",
+      "title": "Implement endpoints for REQ-001",
+      "kind": "implementation",
+      "description": "Implement the contract endpoints with validation, authz and tests.",
+      "requirements": ["REQ-001"],
+      "dependencies": ["TASK-001"],
+      "owned_paths": ["backend/app/", "backend/tests/"],
+      "shared_paths": ["backend/pyproject.toml", "backend/uv.lock"],
+      "expected_artifacts": ["backend/app/api/items.py"],
+      "acceptance_criteria": ["AC-001"],
+      "validation_commands": ["uv run pytest -q"],
+      "status": "PENDING",
+      "attempt": 0
+    }
+  ]
+}

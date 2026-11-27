@@ -1,0 +1,4 @@
+{
+  "profile": "balanced",
+  "description": "Default: full relevant team, independent code QA, browser QA for web apps, security review, AI evaluation for AI apps, code review, final review, up to 5 repairs."
+}

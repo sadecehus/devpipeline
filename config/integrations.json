@@ -1,0 +1,75 @@
+{
+  "description": "Integration registry. 'shipped' integrations are declared in the plugin .mcp.json; others are opt-in and documented in docs/MCP.md.",
+  "integrations": {
+    "ui-ux-pro-max": {
+      "kind": "skill",
+      "required_for": [
+        "ui-ux-designer",
+        "frontend-engineer"
+      ],
+      "install": "claude plugin marketplace add nextlevelbuilder/ui-ux-pro-max-skill && claude plugin install ui-ux-pro-max@ui-ux-pro-max-skill",
+      "skill_id": "ui-ux-pro-max:ui-ux-pro-max",
+      "verified_version": "2.15.0",
+      "verified_commit": "11ca2b3bdd555649f278ee348c32a9302b24dcf1",
+      "license": "MIT",
+      "fallback": "Designer works from skills/frontend-engineering design rules; DESIGN_SYSTEM.md must state that UI UX Pro Max was unavailable."
+    },
+    "playwright": {
+      "kind": "mcp",
+      "shipped": true,
+      "server": "playwright",
+      "tool_prefix": "mcp__plugin_devpipeline_playwright__",
+      "package": "@playwright/mcp@0.0.86",
+      "required_for": [
+        "browser-qa-engineer"
+      ],
+      "capabilities": [
+        "navigate",
+        "click",
+        "type",
+        "snapshot",
+        "screenshot",
+        "console_messages",
+        "network_requests",
+        "resize"
+      ],
+      "fallback": "Executed Playwright test suite via run_checks (e2e kind). Exploratory browser QA is then reported NOT_RUN."
+    },
+    "context7": {
+      "kind": "mcp",
+      "shipped": true,
+      "server": "context7",
+      "tool_prefix": "mcp__plugin_devpipeline_context7__",
+      "url": "https://mcp.context7.com/mcp",
+      "auth": "optional API key (not configured by DevPipeline)",
+      "required_for": [],
+      "fallback": "Agents use WebFetch on official docs URLs listed in the skills."
+    },
+    "chrome-devtools": {
+      "kind": "mcp",
+      "shipped": false,
+      "package": "chrome-devtools-mcp@1.14.0",
+      "enable": "claude mcp add chrome-devtools --scope user -- npx -y chrome-devtools-mcp@1.14.0 --isolated --headless --no-usage-statistics",
+      "required_for": [],
+      "fallback": "Playwright MCP console/network tools."
+    },
+    "github": {
+      "kind": "mcp",
+      "shipped": false,
+      "required_for": [],
+      "note": "Not required for local development. Never enabled by DevPipeline."
+    },
+    "figma": {
+      "kind": "mcp",
+      "shipped": false,
+      "required_for": [],
+      "note": "Optional; requires user credentials."
+    },
+    "database": {
+      "kind": "mcp",
+      "shipped": false,
+      "required_for": [],
+      "note": "Never expose production databases. Use isolated test databases."
+    }
+  }
+}

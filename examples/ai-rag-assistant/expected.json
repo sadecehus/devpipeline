@@ -1,0 +1,8 @@
+{
+  "description": "Example C — AI/RAG service. Verifies AI Engineer + AI Evaluation Engineer activation, structured-output validation, deterministic fixtures and honest NOT_RUN for live evaluation (BLOCKED in strict profile). Run: /devpipeline:build-project $(cat examples/ai-rag-assistant/request.md) --dir ./doc-qa",
+  "features": {"backend": true, "database": true, "ai": true, "rag": true},
+  "profile": "balanced",
+  "expected_agents": ["product-analyst", "software-architect", "backend-engineer", "database-engineer", "ai-engineer", "integration-engineer", "code-qa-engineer", "security-engineer", "ai-evaluation-engineer", "code-reviewer", "technical-writer", "final-reviewer"],
+  "excluded_agents": ["ui-ux-designer", "frontend-engineer", "browser-qa-engineer", "mobile-engineer"],
+  "mandatory_gates": ["ai_evaluation", "security_review", "unit_tests", "final_review"]
+}

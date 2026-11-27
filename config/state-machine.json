@@ -1,0 +1,159 @@
+{
+  "description": "Legal run phase transitions. Terminal: COMPLETED, CANCELLED, FAILED. COMPLETED additionally requires a passing deterministic quality gate for the current fingerprint (enforced by state_manager).",
+  "terminal": [
+    "COMPLETED",
+    "CANCELLED",
+    "FAILED"
+  ],
+  "resumable": [
+    "BLOCKED",
+    "NEEDS_HUMAN_REVIEW",
+    "BUDGET_EXHAUSTED",
+    "AWAITING_APPROVAL"
+  ],
+  "transitions": {
+    "INITIALIZING": [
+      "ANALYZING",
+      "PLANNING",
+      "DEVELOPING",
+      "TESTING",
+      "REPAIRING",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "NEEDS_HUMAN_REVIEW",
+      "BUDGET_EXHAUSTED"
+    ],
+    "ANALYZING": [
+      "PLANNING",
+      "AWAITING_APPROVAL",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "PLANNING": [
+      "AWAITING_APPROVAL",
+      "DESIGNING",
+      "DEVELOPING",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "AWAITING_APPROVAL": [
+      "ANALYZING",
+      "PLANNING",
+      "DESIGNING",
+      "DEVELOPING",
+      "REPAIRING",
+      "CANCELLED"
+    ],
+    "DESIGNING": [
+      "DEVELOPING",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "DEVELOPING": [
+      "INTEGRATING",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "INTEGRATING": [
+      "TESTING",
+      "REPAIRING",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "TESTING": [
+      "REVIEWING",
+      "REPAIRING",
+      "COMPLETED",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "REVIEWING": [
+      "REPAIRING",
+      "DOCUMENTING",
+      "COMPLETED",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "REPAIRING": [
+      "INTEGRATING",
+      "TESTING",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "DOCUMENTING": [
+      "REPAIRING",
+      "TESTING",
+      "REVIEWING",
+      "COMPLETED",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED",
+      "BUDGET_EXHAUSTED",
+      "NEEDS_HUMAN_REVIEW"
+    ],
+    "BLOCKED": [
+      "ANALYZING",
+      "PLANNING",
+      "DESIGNING",
+      "DEVELOPING",
+      "INTEGRATING",
+      "TESTING",
+      "REVIEWING",
+      "REPAIRING",
+      "DOCUMENTING",
+      "CANCELLED"
+    ],
+    "NEEDS_HUMAN_REVIEW": [
+      "ANALYZING",
+      "PLANNING",
+      "DESIGNING",
+      "DEVELOPING",
+      "INTEGRATING",
+      "TESTING",
+      "REVIEWING",
+      "REPAIRING",
+      "DOCUMENTING",
+      "CANCELLED"
+    ],
+    "BUDGET_EXHAUSTED": [
+      "ANALYZING",
+      "PLANNING",
+      "DESIGNING",
+      "DEVELOPING",
+      "INTEGRATING",
+      "TESTING",
+      "REVIEWING",
+      "REPAIRING",
+      "DOCUMENTING",
+      "CANCELLED"
+    ],
+    "COMPLETED": [],
+    "CANCELLED": [],
+    "FAILED": []
+  }
+}

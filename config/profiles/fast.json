@@ -1,0 +1,21 @@
+{
+  "profile": "fast",
+  "description": "Small prototypes/utilities: minimal agents, essential build+test, security checks stay on. Never claims production readiness.",
+  "max_parallel_agents": 2,
+  "max_agent_calls": 40,
+  "max_repair_iterations": 3,
+  "gates": {
+    "code_review": "disabled",
+    "performance": "disabled",
+    "accessibility": "disabled",
+    "integration_tests": "optional",
+    "api_contract_tests": "optional",
+    "lint": "optional",
+    "typecheck": "optional"
+  },
+  "agents": {
+    "code-reviewer": "disabled",
+    "performance-engineer": "disabled",
+    "devops-engineer": "auto"
+  }
+}

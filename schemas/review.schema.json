@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/review.schema.json",
+  "title": "Code review / final review verdict",
+  "type": "object",
+  "required": [
+    "kind",
+    "agent",
+    "approved",
+    "status",
+    "source_fingerprint",
+    "blocking_issues",
+    "non_blocking_issues",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "code_review",
+        "final_review"
+      ]
+    },
+    "agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "approved": {
+      "type": "boolean"
+    },
+    "status": {
+      "enum": [
+        "APPROVED",
+        "REPAIR_REQUIRED",
+        "BLOCKED",
+        "NEEDS_HUMAN_REVIEW"
+      ]
+    },
+    "source_fingerprint": {
+      "type": "string"
+    },
+    "requirements_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "requirements_verified": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missing_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^REQ-[0-9]{3,}$"
+      }
+    },
+    "acceptance_matrix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ac_id",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ac_id": {
+            "type": "string",
+            "pattern": "^AC-[0-9]{3,}$"
+          },
+          "requirement_id": {
+            "type": "string",
+            "pattern": "^REQ-[0-9]{3,}$"
+          },
+          "status": {
+            "enum": [
+              "VERIFIED",
+              "IMPLEMENTED_UNVERIFIED",
+              "FAILED",
+              "MISSING",
+              "BLOCKED"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "blocking_issues": {
+      "type": "array",
+      "items": {
+        "$ref": "issue.schema.json"
+      }
+    },
+    "non_blocking_issues": {
+      "type": "array",
+      "items": {
+        "$ref": "issue.schema.json"
+      }
+    },
+    "required_repairs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  }
+}

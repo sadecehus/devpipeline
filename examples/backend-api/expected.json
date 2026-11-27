@@ -1,0 +1,9 @@
+{
+  "description": "Example B — backend-only API. Verifies that no frontend/browser agents are activated. Run: /devpipeline:build-project $(cat examples/backend-api/request.md) --dir ./book-api --profile fast",
+  "features": {"backend": true, "database": true},
+  "profile": "fast",
+  "expected_agents": ["product-analyst", "software-architect", "backend-engineer", "database-engineer", "integration-engineer", "code-qa-engineer", "technical-writer", "final-reviewer"],
+  "excluded_agents": ["ui-ux-designer", "frontend-engineer", "browser-qa-engineer", "ai-engineer", "ai-evaluation-engineer", "mobile-engineer", "code-reviewer"],
+  "mandatory_gates": ["unit_tests", "secret_scan", "final_review"],
+  "not_applicable_gates": ["e2e_tests", "browser_qa", "ai_evaluation"]
+}

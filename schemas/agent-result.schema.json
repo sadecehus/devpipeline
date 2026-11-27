@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/agent-result.schema.json",
+  "title": "Agent task result",
+  "description": "Machine-readable result every DevPipeline agent returns and writes to agent-results/<task_id>.json.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "task_id",
+    "agent",
+    "status",
+    "changed_files",
+    "validation",
+    "issues",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^(TASK-[0-9]{3,}(-R[0-9]+)?|PLAN-[A-Z]+|QA-[A-Z-]+|REVIEW-[A-Z]+|DOC-[A-Z]+|INTEGRATION(-[0-9]+)?)$"
+    },
+    "agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "status": {
+      "enum": [
+        "COMPLETED",
+        "FAILED",
+        "BLOCKED",
+        "PARTIAL",
+        "NEEDS_INPUT"
+      ]
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^REQ-[0-9]{3,}$"
+      }
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "SKIPPED",
+              "NOT_RUN",
+              "BLOCKED",
+              "ERROR",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "evidence_path": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "issue.schema.json"
+      }
+    },
+    "contract_change_requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "contract",
+          "change",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "contract": {
+            "type": "string"
+          },
+          "change": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

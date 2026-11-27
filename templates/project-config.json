@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "project_id": "00000000-0000-0000-0000-000000000000",
+  "project_name": "example",
+  "created_by_devpipeline": false,
+  "profile": "balanced",
+  "language": "en",
+  "stack_preferences": {},
+  "overrides": {
+    "max_parallel_agents": 3,
+    "max_repair_iterations": 5
+  },
+  "protected_paths": ["infra/production/"],
+  "qa_write_paths": ["tests/", "test/", "e2e/", "evals/", "**/__tests__/**", "*.test.*", "*.spec.*", "**/*.test.*", "**/*.spec.*", "**/tests/**", "**/e2e/**", "playwright.config.*", "**/playwright.config.*"],
+  "integrations": {},
+  "approved_environments": ["http://localhost", "http://127.0.0.1"]
+}

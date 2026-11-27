@@ -1,0 +1,318 @@
+{
+  "description": "Deterministic quality gate definitions. Profiles override 'default' via config.gates[id] = mandatory|optional|disabled. Gates whose applicability holds can only be disabled when not required by project requirements.",
+  "statuses": [
+    "PASS",
+    "FAIL",
+    "SKIPPED",
+    "NOT_RUN",
+    "BLOCKED",
+    "ERROR",
+    "NOT_APPLICABLE"
+  ],
+  "allow_skipped_tests": false,
+  "gates": [
+    {
+      "id": "dependency_validation",
+      "description": "Task DAG valid (unique ids, known agents, no cycles, no ownership conflicts).",
+      "source": "plan_validation",
+      "applies": {
+        "always": true
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "task_completion",
+      "description": "Every planned task COMPLETED.",
+      "source": "tasks",
+      "applies": {
+        "modes": [
+          "build",
+          "improve",
+          "repair"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "requirements_coverage",
+      "description": "Every must/should requirement covered by a completed task and every must AC VERIFIED by the final reviewer.",
+      "source": "coverage",
+      "applies": {
+        "modes": [
+          "build",
+          "improve"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "install",
+      "description": "Dependencies install from lockfile.",
+      "source": "checks",
+      "kinds": [
+        "install"
+      ],
+      "applies": {
+        "check_kinds_detected": [
+          "install"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "integration_build",
+      "description": "Integrated project builds.",
+      "source": "checks",
+      "kinds": [
+        "build"
+      ],
+      "applies": {
+        "check_kinds_detected": [
+          "build"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "typecheck",
+      "description": "Static type checking.",
+      "source": "checks",
+      "kinds": [
+        "typecheck"
+      ],
+      "applies": {
+        "check_kinds_detected": [
+          "typecheck"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "lint",
+      "description": "Lint.",
+      "source": "checks",
+      "kinds": [
+        "lint"
+      ],
+      "applies": {
+        "check_kinds_detected": [
+          "lint"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "unit_tests",
+      "description": "Unit tests executed with >0 tests and no skipped mandatory tests.",
+      "source": "checks",
+      "kinds": [
+        "unit"
+      ],
+      "applies": {
+        "min_implementation_agents": 1
+      },
+      "default": "mandatory",
+      "tests_required": true
+    },
+    {
+      "id": "integration_tests",
+      "description": "Integration tests.",
+      "source": "checks",
+      "kinds": [
+        "integration"
+      ],
+      "applies": {
+        "any_feature": [
+          "backend",
+          "database"
+        ]
+      },
+      "default": "optional",
+      "tests_required": true
+    },
+    {
+      "id": "api_contract_tests",
+      "description": "API/contract tests.",
+      "source": "checks",
+      "kinds": [
+        "api",
+        "contract"
+      ],
+      "applies": {
+        "any_feature": [
+          "backend"
+        ]
+      },
+      "default": "optional",
+      "tests_required": true
+    },
+    {
+      "id": "e2e_tests",
+      "description": "Repeatable browser end-to-end tests (Playwright) executed against the running app.",
+      "source": "checks",
+      "kinds": [
+        "e2e"
+      ],
+      "applies": {
+        "any_feature": [
+          "frontend",
+          "browser_ui"
+        ]
+      },
+      "default": "mandatory",
+      "tests_required": true
+    },
+    {
+      "id": "browser_qa",
+      "description": "Browser QA exercised the running app in a real browser.",
+      "source": "report",
+      "report_kind": "browser_qa",
+      "applies": {
+        "any_feature": [
+          "frontend",
+          "browser_ui"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "accessibility",
+      "description": "Accessibility checks (WCAG 2.2 AA target).",
+      "source": "checks",
+      "kinds": [
+        "accessibility"
+      ],
+      "applies": {
+        "any_feature": [
+          "frontend",
+          "browser_ui",
+          "mobile"
+        ]
+      },
+      "default": "optional"
+    },
+    {
+      "id": "secret_scan",
+      "description": "No secrets committed (built-in scanner).",
+      "source": "checks",
+      "kinds": [
+        "security"
+      ],
+      "names": [
+        "secret-scan"
+      ],
+      "applies": {
+        "always": true
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "dependency_audit",
+      "description": "Dependency vulnerability audit (npm audit / pip-audit / ...). Unavailable scanner = NOT_RUN, never PASS.",
+      "source": "checks",
+      "kinds": [
+        "security"
+      ],
+      "names_prefix": "dependency-audit",
+      "applies": {
+        "check_kinds_detected": [
+          "install"
+        ]
+      },
+      "default": "optional"
+    },
+    {
+      "id": "security_review",
+      "description": "Security engineer report has no unresolved critical/high finding.",
+      "source": "report",
+      "report_kind": "security",
+      "applies": {
+        "agent_selected": "security-engineer"
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "ai_evaluation",
+      "description": "Deterministic AI evaluation suite passes; live evaluation per live_ai_evaluation policy.",
+      "source": "report",
+      "report_kind": "ai_eval",
+      "applies": {
+        "any_feature": [
+          "ai",
+          "rag"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "performance",
+      "description": "Performance budgets measured locally.",
+      "source": "report",
+      "report_kind": "performance",
+      "applies": {
+        "any_feature": [
+          "performance_requirements"
+        ],
+        "profiles": [
+          "strict"
+        ]
+      },
+      "default": "optional"
+    },
+    {
+      "id": "code_qa",
+      "description": "Code QA report PASS.",
+      "source": "report",
+      "report_kind": "code_qa",
+      "applies": {
+        "agent_selected": "code-qa-engineer"
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "code_review",
+      "description": "Independent code review without unresolved blocking findings.",
+      "source": "review",
+      "review_kind": "code_review",
+      "applies": {
+        "agent_selected": "code-reviewer"
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "documentation",
+      "description": "README exists, documents install/run/test, referenced npm scripts exist, env vars documented without values.",
+      "source": "documentation",
+      "applies": {
+        "modes": [
+          "build",
+          "improve"
+        ]
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "open_blocking_issues",
+      "description": "No OPEN blocking issue (critical/high security findings are blocking).",
+      "source": "issues",
+      "applies": {
+        "always": true
+      },
+      "default": "mandatory"
+    },
+    {
+      "id": "final_review",
+      "description": "Final Reviewer approved the current code fingerprint. Never overrides a failed mandatory check.",
+      "source": "review",
+      "review_kind": "final_review",
+      "applies": {
+        "modes": [
+          "build",
+          "improve",
+          "repair"
+        ]
+      },
+      "default": "mandatory"
+    }
+  ]
+}

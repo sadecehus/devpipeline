@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.devpipeline/
+node_modules/
+.DS_Store
+/tests/.tmp/

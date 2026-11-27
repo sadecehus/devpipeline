@@ -1,0 +1,26 @@
+{
+  "name": "devpipeline",
+  "displayName": "DevPipeline",
+  "version": "0.1.0",
+  "description": "Multi-agent software development framework: dynamic agent selection, dependency-aware parallel tasks in git worktrees, deterministic quality gates, bounded repair loops and persistent, resumable state.",
+  "author": {
+    "name": "DevPipeline (local)"
+  },
+  "license": "MIT",
+  "keywords": [
+    "multi-agent",
+    "workflow",
+    "quality-gates",
+    "orchestration",
+    "testing"
+  ],
+  "engines": {
+    "claude-code": ">=2.1.269"
+  },
+  "network": {
+    "hosts": [
+      "mcp.context7.com",
+      "registry.npmjs.org"
+    ]
+  }
+}

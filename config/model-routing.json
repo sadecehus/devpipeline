@@ -1,0 +1,47 @@
+{
+  "description": "Model aliases per agent category; profile maps override the default map. Only documented aliases are used (opus, sonnet, haiku, inherit).",
+  "default": {
+    "planning": "sonnet",
+    "architecture": "opus",
+    "orchestration": "sonnet",
+    "design": "sonnet",
+    "implementation": "sonnet",
+    "integration": "sonnet",
+    "testing": "sonnet",
+    "review": "opus",
+    "final_review": "opus",
+    "documentation": "haiku",
+    "operator": "haiku"
+  },
+  "profiles": {
+    "fast": {
+      "architecture": "sonnet",
+      "review": "sonnet",
+      "final_review": "sonnet"
+    },
+    "balanced": {},
+    "strict": {
+      "orchestration": "opus",
+      "planning": "opus"
+    }
+  },
+  "effort": {
+    "default": {
+      "architecture": "high",
+      "review": "high",
+      "final_review": "high",
+      "operator": "low"
+    },
+    "profiles": {
+      "fast": {
+        "architecture": "medium",
+        "review": "medium",
+        "final_review": "medium"
+      },
+      "strict": {
+        "architecture": "xhigh",
+        "final_review": "xhigh"
+      }
+    }
+  }
+}

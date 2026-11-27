@@ -1,0 +1,12 @@
+{
+  "name": "devpipeline-local",
+  "description": "Local marketplace for the DevPipeline framework (this repository).",
+  "owner": { "name": "DevPipeline (local)" },
+  "plugins": [
+    {
+      "name": "devpipeline",
+      "source": "./",
+      "description": "Multi-agent software development framework with deterministic quality gates."
+    }
+  ]
+}

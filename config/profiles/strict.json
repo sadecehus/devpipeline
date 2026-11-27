@@ -1,0 +1,18 @@
+{
+  "profile": "strict",
+  "description": "Production-oriented/security-sensitive: stronger models, expanded checks, performance + accessibility, mandatory live AI evaluation, plan approval.",
+  "max_parallel_agents": 3,
+  "max_agent_calls": 120,
+  "max_repair_iterations": 5,
+  "require_plan_approval": true,
+  "auto_accept_assumptions": false,
+  "gates": {
+    "performance": "mandatory",
+    "accessibility": "mandatory",
+    "dependency_audit": "mandatory"
+  },
+  "agents": {
+    "performance-engineer": "required"
+  },
+  "live_ai_evaluation": "mandatory"
+}

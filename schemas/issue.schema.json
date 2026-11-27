@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/issue.schema.json",
+  "title": "DevPipeline issue",
+  "description": "A normalised defect/finding routed to a responsible agent.",
+  "type": "object",
+  "required": [
+    "id",
+    "source_agent",
+    "assigned_agent",
+    "severity",
+    "category",
+    "description",
+    "blocking",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ISSUE-[0-9]{3,}$"
+    },
+    "source_agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "assigned_agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "severity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ]
+    },
+    "category": {
+      "enum": [
+        "functional",
+        "visual",
+        "accessibility",
+        "api",
+        "contract",
+        "database",
+        "ai_quality",
+        "ai_security",
+        "security",
+        "performance",
+        "integration",
+        "infrastructure",
+        "build",
+        "test",
+        "documentation",
+        "code_quality",
+        "requirements"
+      ]
+    },
+    "requirement_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^REQ-[0-9]{3,}$"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^AC-[0-9]{3,}$"
+      }
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "affected_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected_behavior": {
+      "type": "string"
+    },
+    "actual_behavior": {
+      "type": "string"
+    },
+    "reproduction_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "impact": {
+      "type": "string"
+    },
+    "remediation": {
+      "type": "string"
+    },
+    "verification_criteria": {
+      "type": "string"
+    },
+    "blocking": {
+      "type": "boolean"
+    },
+    "status": {
+      "enum": [
+        "OPEN",
+        "IN_REPAIR",
+        "RESOLVED",
+        "WONT_FIX",
+        "DUPLICATE",
+        "PRE_EXISTING"
+      ]
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "first_seen_iteration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_seen_iteration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "check_name": {
+      "type": "string"
+    },
+    "pre_existing": {
+      "type": "boolean"
+    }
+  }
+}

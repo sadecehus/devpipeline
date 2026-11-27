@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devpipeline.local/schemas/requirements.schema.json",
+  "title": "Requirements specification",
+  "type": "object",
+  "required": [
+    "project_title",
+    "summary",
+    "requirements",
+    "assumptions",
+    "non_goals",
+    "features"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "project_title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "language": {
+      "type": "string"
+    },
+    "target_users": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "use_cases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "user_journeys": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "edge_cases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mvp_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "future_improvements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "non_goals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "frontend": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "boolean"
+        },
+        "database": {
+          "type": "boolean"
+        },
+        "ai": {
+          "type": "boolean"
+        },
+        "rag": {
+          "type": "boolean"
+        },
+        "mobile": {
+          "type": "boolean"
+        },
+        "devops": {
+          "type": "boolean"
+        },
+        "browser_ui": {
+          "type": "boolean"
+        },
+        "performance_requirements": {
+          "type": "boolean"
+        },
+        "documentation": {
+          "type": "boolean"
+        },
+        "authentication": {
+          "type": "boolean"
+        },
+        "payments": {
+          "type": "boolean"
+        },
+        "external_messaging": {
+          "type": "boolean"
+        }
+      }
+    },
+    "stack_preferences": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "blocking_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "why_blocking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "why_blocking": {
+            "type": "string"
+          },
+          "default_if_unanswered": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "priority",
+          "type",
+          "description",
+          "acceptance_criteria"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^REQ-[0-9]{3,}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "priority": {
+            "enum": [
+              "must",
+              "should",
+              "could",
+              "wont"
+            ]
+          },
+          "type": {
+            "enum": [
+              "functional",
+              "non_functional"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "description",
+                "verification_method"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^AC-[0-9]{3,}$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "verification_method": {
+                  "enum": [
+                    "unit",
+                    "integration",
+                    "e2e",
+                    "api",
+                    "contract",
+                    "ai_eval",
+                    "security_scan",
+                    "performance",
+                    "accessibility",
+                    "inspection",
+                    "manual_review"
+                  ]
+                }
+              }
+            }
+          },
+          "source": {
+            "enum": [
+              "user",
+              "derived_security",
+              "derived_correctness",
+              "derived_usability",
+              "existing_behavior"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
