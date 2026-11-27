@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.3 — 2026-11-28
+### Fixed
+- `undefined is not an object (evaluating 'tasks.filter')`: a workflow started with an older engine received the new delta-only `finish-tasks` output because the plugin is read from its source folder and the helpers changed mid-run. Workflows and helpers now exchange a protocol version on every call; a mismatch stops the run `BLOCKED` before anything changes (resume relaunches the current workflow). Helpers still return full task lists to pre-handshake workflows.
+- Agent results with harmless shape mistakes (string artifacts, missing `run_id`/`agent`/`issues`, extra validation keys such as `evidence`) are normalised by the coordinator instead of failing the task; identity conflicts and missing status/summary are still rejected.
+### Added
+- `prepare --reuse-plan` / `/devpipeline:build-project --reuse-plan`: start a new run from an earlier run's validated requirements, architecture and task plan (skips analyst and architect).
+
+## 0.1.2 — 2026-11-28
+### Fixed (root cause of the field report)
+- Raw logs showed the relay model rewriting `$.tasks[8].agent` (`technical-writer` → `backend-engineer`) in a 9-entry, highly repetitive task list — identically on all 3 attempts. `finish-tasks` and `verify-merge` now relay only the tasks that changed (`updates`: id, status, attempt); the workflow applies the deltas to the plan it already holds, so static fields never travel through the relay again.
+- The third relay attempt uses a different model (Sonnet) with an explicit "do not assume list entries repeat" note, because the same model repeats the same mistake.
+- Task prompts include the exact agent-result JSON skeleton (the same run's first attempt failed schema validation: missing `run_id`/`agent`/`issues`, extra `evidence`).
+
+## 0.1.1 — 2026-11-28
+### Fixed
+- Operator relay hardening after a field report (run FAILED after 3 rejected `finish-tasks` relays):
+  - every helper call carries an op key; a relay retry returns the recorded result and never re-executes the operation;
+  - helpers print raw UTF-8 (no `\uXXXX` escapes for the relaying model to mangle) and relay payloads omit free text (titles, long errors);
+  - after 3 integrity failures the run stops `BLOCKED` (resumable) instead of `FAILED`, and `runs/<run>/ops/relay-failure-*.json` records exactly which fields the relay changed;
+  - native Windows Python supported for state locking (msvcrt fallback).
+
 ## 0.1.0 — 2026-11-27
 Initial release.
 

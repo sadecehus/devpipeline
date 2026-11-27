@@ -14,7 +14,7 @@ User input: $ARGUMENTS
 1. Project directory = `--dir` or cwd. Check the current state first:
    `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/devpipeline.py" status --project "<dir>" [--run <RUN_ID>]`
 2. If the phase is `AWAITING_APPROVAL`: show the pending questions or plan (from `stop_reason`, `.devpipeline/requirements.json` `blocking_questions`, or the plan in `.devpipeline/tasks.json`). If the user's input does not already answer/approve them, ask (AskUserQuestion). Compose one approval note, e.g. `Q-1: EUR; Q-2: no SSO; plan approved`.
-3. If the phase is terminal (`COMPLETED`, `CANCELLED`, `FAILED`), do not resume; suggest a new improve/repair run.
+3. If the phase is terminal (`COMPLETED`, `CANCELLED`, `FAILED`), do not resume. If it FAILED before development started but planning finished, suggest `/devpipeline:build-project --dir <dir> --reuse-plan` (keeps the validated plan); otherwise suggest a new improve/repair run.
 4. For BLOCKED / NEEDS_HUMAN_REVIEW / BUDGET_EXHAUSTED: show `stop_reason`; resuming only helps if the blocker was resolved (credentials provided, environment fixed, limits raised in `.devpipeline/config.json` `overrides`). Ask the user to confirm the blocker is resolved.
 5. **Validate and prepare the resume**:
    ```bash

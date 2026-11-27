@@ -122,6 +122,12 @@ export function team(opts = {}) {
     } else {
       for (const pth of t.owned_paths) put(pth.endsWith('/') ? pth + 'index.js' : pth, `// ${t.title} (attempt ${n})\nmodule.exports = {}\n`)
     }
+    if (opts.sloppyResults) {  // field report: artifacts as strings, missing identity fields, extra validation keys
+      const res = { status: 'COMPLETED', changed_files: [...new Set(changed)], artifacts: ['docs/design/index.js'],
+        validation: [{ name: 'lint', status: 'PASS', exit_code: 0, evidence: 'logs/x.log' }], summary: 'done' }
+      w(info.resultPath, res)
+      return { status: 'COMPLETED', summary: 'done' }
+    }
     return result(info, name, 'COMPLETED', [...new Set(changed)])
   }
   for (const n of ['backend-engineer', 'frontend-engineer', 'database-engineer', 'ai-engineer', 'ui-ux-designer', 'devops-engineer', 'mobile-engineer']) fakes[n] = engineer(n)

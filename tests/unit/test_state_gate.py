@@ -336,6 +336,51 @@ class VerifierRegressionTests(unittest.TestCase):
         write(d / ".env", "SECRET=1")
         self.assertFalse(any(".env" in l for l in wm.checkout_state(d)["status"]))
 
+    def test_op_key_makes_operations_idempotent(self):
+        import json as _json, subprocess, sys as _sys
+        from helpers import ROOT
+        project, run = new_run()
+        cmd = [_sys.executable, str(ROOT / "scripts/devpipeline.py"), "transition", "--project", str(project), "--run", run,
+               "--to", "ANALYZING", "--op-key", "inv1-1-transition"]
+        a = subprocess.run(cmd, capture_output=True, text=True).stdout
+        sm.transition(project, run, "PLANNING", "moved on")
+        b = subprocess.run(cmd, capture_output=True, text=True).stdout   # retry of the same logical op
+        self.assertEqual(a, b)
+        self.assertEqual(sm.load_manifest(project, run)["phase"], "PLANNING", "cached retry did not re-execute")
+        self.assertIn("checksum", _json.loads(b))
+
+    def test_output_is_raw_utf8_and_checksum_transport_independent(self):
+        from dpcore.util import emit_line, canonical_json, fnv1a32
+        import json as _json
+        line = emit_line({"title": "Kız Kulesi"})
+        self.assertIn("Kız", line)
+        d = _json.loads(line)
+        cs = d.pop("checksum")
+        self.assertEqual(cs, fnv1a32(canonical_json(d)))
+
+    def test_protocol_handshake(self):
+        import json as _json, subprocess, sys as _sys
+        from helpers import ROOT
+        project, run = new_run()
+        base = [_sys.executable, str(ROOT / "scripts/devpipeline.py"), "context", "--project", str(project), "--run", run]
+        bad = _json.loads(subprocess.run(base + ["--protocol", "1"], capture_output=True, text=True).stdout)
+        self.assertTrue(bad["protocol_mismatch"])
+        self.assertFalse(bad["ok"])
+        self.assertEqual(sm.load_manifest(project, run)["phase"], "INITIALIZING", "mismatch changes nothing")
+        import devpipeline as dpm
+        ok = _json.loads(subprocess.run(base + ["--protocol", str(dpm.PROTOCOL)], capture_output=True, text=True).stdout)
+        self.assertTrue(ok["ok"])
+
+    def test_result_normalisation_keeps_real_errors(self):
+        import devpipeline as dpm
+        d = tmpdir()
+        f = write(d / "r.json", {"status": "COMPLETED", "artifacts": ["a.md"], "validation": [{"name": "t", "status": "PASS", "exit_code": 0, "evidence": "l.log"}], "summary": "s"})
+        res = dpm.normalize_result(f, "run-1", "TASK-001", "backend-engineer")
+        import validate_contracts as vc
+        self.assertTrue(vc.check_result(res, "TASK-001", "backend-engineer", "run-1")["valid"], vc.check_result(res)["errors"])
+        g = write(d / "g.json", {"task_id": "TASK-009", "status": "COMPLETED", "summary": "s"})
+        self.assertFalse(vc.check_result(dpm.normalize_result(g, "run-1", "TASK-001", "backend-engineer"), "TASK-001")["valid"])
+
     def test_ai_engineer_task_forces_ai_evaluation(self):
         from dpcore.selection import select_agents
         sel = [s["agent"] for s in select_agents({"backend": True}, "balanced", "build", ["ai-engineer"], ["ai-engineer"])["selected"]]

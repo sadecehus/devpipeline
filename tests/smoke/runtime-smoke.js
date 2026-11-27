@@ -88,28 +88,49 @@ function q(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
 // ------------------------------------------------------------ operator ----
 const OP_SCHEMA = { type: 'object', required: ['exit_code', 'output'], properties: { exit_code: { type: 'integer' }, output: { type: 'object' } } }
 
+const PROTOCOL = 2  // must equal PROTOCOL in scripts/devpipeline.py
+let OP_SEQ = 0
 async function op(cmd, extra) {
-  const parts = ['python3', q(DP.plugin_root + '/scripts/devpipeline.py'), cmd, '--project', q(DP.project_dir), '--run', q(DP.run_id)].concat(extra || [])
+  OP_SEQ++
+  // the op key makes the helper idempotent: a relay retry returns the recorded result instead of re-running the operation
+  const key = `${String(DP.invocation || 'inv').replace(/[^A-Za-z0-9]/g, '')}-${OP_SEQ}-${cmd}`
+  const parts = ['python3', q(DP.plugin_root + '/scripts/devpipeline.py'), cmd, '--project', q(DP.project_dir), '--run', q(DP.run_id), '--op-key', key, '--protocol', String(PROTOCOL)].concat(extra || [])
   const command = parts.join(' ')
+  let lastRelayed = null
   for (let attempt = 1; attempt <= 3; attempt++) {
     if (counters.operator_calls >= CFG.max_operator_calls) throw new StopRun('BUDGET_EXHAUSTED', `operator call limit (${CFG.max_operator_calls}) reached`)
     counters.operator_calls++
     let r = null
     try {
-      r = await agent(`Run this DevPipeline helper exactly once and relay its JSON.\n<command>${command}</command>`,
-        { agentType: PFX + 'pipeline-operator', label: `op:${cmd}`, phase: PHASE, schema: OP_SCHEMA, model: 'haiku', effort: 'low' })
+      const retryNote = attempt > 1 ? '\nYour previous relay of this output was rejected because a value differed from the printed JSON. Copy every value character by character; in lists, do not assume entries repeat the previous entry.' : ''
+      r = await agent(`Run this DevPipeline helper exactly once and relay its JSON.${retryNote}\n<command>${command}</command>`,
+        { agentType: PFX + 'pipeline-operator', label: `op:${cmd}`, phase: PHASE, schema: OP_SCHEMA, model: attempt < 3 ? 'haiku' : 'sonnet', effort: 'low' })
     } catch (e) {
       log(`operator call for ${cmd} failed (attempt ${attempt}): ${e && e.message}`)
       continue
     }
-    if (r && checksumOk(r.output)) return r.output
+    if (r && checksumOk(r.output)) {
+      if (r.output.protocol_mismatch) throw new StopRun('BLOCKED', r.output.error)
+      return r.output
+    }
+    if (r && r.output) lastRelayed = r.output
     log(`operator relay for ${cmd} failed integrity check (attempt ${attempt}); retrying`)
   }
-  throw new StopRun('FAILED', `deterministic helper '${cmd}' could not be executed/relayed after 3 attempts`)
+  let where = ''
+  if (lastRelayed) {  // best effort: store a diff between the true output and what was relayed
+    try {
+      const d = await agent(`Run this DevPipeline helper exactly once and relay its JSON.\n<command>${['python3', q(DP.plugin_root + '/scripts/devpipeline.py'), 'relay-failure', '--project', q(DP.project_dir), '--run', q(DP.run_id), '--op-key', key, '--relayed-b64', b64json(lastRelayed).slice(0, 12000)].join(' ')}</command>`,
+        { agentType: PFX + 'pipeline-operator', label: `op:relay-failure`, phase: PHASE, schema: OP_SCHEMA, model: 'haiku', effort: 'low' })
+      if (d && d.output && d.output.diagnostics) where = `; diagnostics: ${d.output.diagnostics}`
+    } catch (e) { /* diagnostics are optional */ }
+  }
+  // the operation itself ran (its result is recorded under the op key); the run is resumable, not failed
+  throw new StopRun('BLOCKED', `operator relay for '${cmd}' failed the integrity check 3 times${where}. The helper's result is recorded; run /devpipeline:resume-project to continue`)
 }
 
 async function mustOp(cmd, extra) {
   const out = await op(cmd, extra)
+  if (out.ok === false && out.protocol_mismatch) throw new StopRun('BLOCKED', out.error)
   if (out.ok === false) throw new StopRun('FAILED', `${cmd}: ${out.error}`)
   return out
 }
@@ -175,6 +196,11 @@ function header(taskId, cwd, resultPath) {
 async function analysis() {
   if (done('analysis')) return
   await to('ANALYZING', 'requirements analysis')
+  if (DP.reuse_plan) {
+    const reused = await mustOp('validate-requirements')
+    if (reused.valid) { log('reusing existing requirements.json (validated)'); await markStep('analysis'); return }
+    log('existing requirements.json is not valid; running the product analyst')
+  }
   let errors = []
   let v = null
   for (let attempt = 1; attempt <= CFG.max_task_retries + 1; attempt++) {
@@ -203,6 +229,16 @@ async function planning() {
   await to('PLANNING', 'architecture and task graph')
   let errors = []
   let plan = null
+  if (DP.reuse_plan) {
+    plan = await mustOp('validate-plan')
+    if (plan.valid) {
+      log(`reusing existing architecture and ${plan.tasks.length}-task plan (validated)`)
+      await markStep('planning')
+      return plan
+    }
+    errors = plan.errors || []
+    log('existing plan is not valid; the architect will fix it')
+  }
   for (let attempt = 1; attempt <= CFG.max_task_retries + 1; attempt++) {
     const prompt = header('PLAN-ARCHITECTURE', P().project, `${P().run_dir}/agent-results/PLAN-ARCHITECTURE.json`) + `\n
 Design the architecture for the validated requirements. Produce ${P().dp}/architecture.json (schema architecture.schema.json), ${P().dp}/ARCHITECTURE.md, ADRs in ${P().dp}/adr/, contracts in ${P().contracts}/ and the task DAG in ${P().dp}/tasks.json (schema task.schema.json, all tasks status PENDING, attempt 0).
@@ -250,7 +286,10 @@ function taskPrompt(s) {
   return header(s.task_id, s.worktree, s.result_path) + `\n
 Your task: ${s.task_id} "${s.title}" (attempt ${s.attempt}). Read its full definition in ${P().run_dir}/tasks.json.
 Owned paths (only these may change): ${JSON.stringify(s.owned_paths)}
-${repair ? `This is a REPAIR task for issues ${s.issue_ids.join(', ')} — read each in ${P().run_dir}/issues/<ID>.json. Fix root causes; never weaken tests, remove requirements or change contracts to make checks pass.\n` : ''}${s.kind === 'contract' ? `Contract task: update ${P().contracts}/ and append the change with reason to ${P().dp}/contract-changes.json; do not edit application code.\n` : ''}${s.failure_reason ? `Previous attempt was rejected: ${s.failure_reason}\n` : ''}Do not commit — the coordinator commits your worktree and merges it. Finish by writing the agent-result JSON to the result path and returning it.`
+${repair ? `This is a REPAIR task for issues ${s.issue_ids.join(', ')} — read each in ${P().run_dir}/issues/<ID>.json. Fix root causes; never weaken tests, remove requirements or change contracts to make checks pass.\n` : ''}${s.kind === 'contract' ? `Contract task: update ${P().contracts}/ and append the change with reason to ${P().dp}/contract-changes.json; do not edit application code.\n` : ''}${s.failure_reason ? `Previous attempt was rejected: ${s.failure_reason}\n` : ''}Do not commit — the coordinator commits your worktree and merges it. Finish by writing the agent-result JSON to the result path and returning it.
+Required shape (schema ${P().schemas}/agent-result.schema.json — no extra keys):
+{"run_id": "${DP.run_id}", "task_id": "${s.task_id}", "agent": "${s.agent}", "status": "COMPLETED", "requirements": [], "changed_files": ["<path>"], "artifacts": [{"path": "<file>", "kind": "doc"}],
+ "validation": [{"name": "unit", "status": "PASS", "exit_code": 0, "command": "<cmd>", "evidence_path": "<log path>"}], "issues": [], "summary": "<one paragraph>"}`
 }
 
 async function resolveConflicts(conflicts) {
@@ -261,6 +300,14 @@ ${conflicts.map(c => `- ${c.task_id}: branch ${c.branch}; conflicting files ${JS
 In ${P().integration} run \`git merge --no-ff <branch>\` for each, resolve conflicts preserving both sides' intent, \`git add\` the files and conclude with \`git commit --no-edit\`. Never drop either side; contract conflicts → issue to software-architect.`
   await specialist('integration-engineer', prompt, { label: `merge:${ids.join(',')}` })
   return mustOp('verify-merge', ['--tasks', ids.join(',')])
+}
+
+function applyUpdates(tasks, updates) {
+  if (!Array.isArray(tasks)) throw new StopRun('BLOCKED', 'internal: task list missing in workflow state; resume the run')
+  // helpers return only the tasks that changed; static fields (agent, deps, kind) never travel through the relay again
+  const byId = {}
+  for (const u of updates || []) byId[u.id] = u
+  return tasks.map(t => (byId[t.id] ? { ...t, status: byId[t.id].status, attempt: byId[t.id].attempt } : t))
 }
 
 async function schedule(tasks, filter) {
@@ -277,8 +324,8 @@ async function schedule(tasks, filter) {
     st.started.forEach((s, i) => { returned[s.task_id] = results[i] ? results[i].status : null })
     let fin = await mustOp('finish-tasks', ['--tasks', ready.join(','), '--returned-b64', b64json(returned)])
     for (const r of fin.results) if (r.status !== 'COMPLETED') log(`${r.id}: ${r.status}${r.retry ? ' (will retry)' : ''} ${r.errors.join('; ')}`)
-    tasks = fin.tasks
-    if (fin.conflicts && fin.conflicts.length) tasks = (await resolveConflicts(fin.conflicts)).tasks
+    tasks = applyUpdates(tasks, fin.updates)
+    if (fin.conflicts && fin.conflicts.length) tasks = applyUpdates(tasks, (await resolveConflicts(fin.conflicts)).updates)
   }
   return tasks
 }

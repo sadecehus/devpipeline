@@ -68,6 +68,16 @@ export async function runWorkflow(file, args, fakes, options = {}) {
     calls.push({ name, label: opts.label, phase: opts.phase, model: opts.model })
     if (name === 'pipeline-operator') {
       const res = runOperatorCommand(prompt)
+      if (options.haikuMiscopies && prompt.includes(` ${options.haikuMiscopies} `) && opts.model === 'haiku') {
+        // reproduces the field report: the same model makes the same copying mistake on every retry
+        const bad = JSON.parse(JSON.stringify(res.output))
+        if (Array.isArray(bad.updates) && bad.updates.length) bad.updates[bad.updates.length - 1].attempt += 7
+        else bad.ok = !bad.ok
+        return { exit_code: res.exit_code, output: bad }
+      }
+      if (options.tamperAlways && prompt.includes(` ${options.tamperAlways} `) && !state.killed) {
+        return { exit_code: res.exit_code, output: { ...res.output, injected: 'tampered' } }
+      }
       if (state.tamperOnce && prompt.includes(` ${state.tamperOnce} `)) {
         state.tamperOnce = null
         return { exit_code: res.exit_code, output: { ...res.output, injected: 'tampered' } }

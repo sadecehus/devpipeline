@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import datetime as _dt
-import fcntl
 import hashlib
 import json
 import os
@@ -74,18 +73,26 @@ def file_lock(lock_path: Path | str, timeout_s: float = 60.0) -> Iterator[None]:
     fh = open(p, "a+")
     deadline = time.monotonic() + timeout_s
     try:
+        import fcntl  # POSIX
+        lock = lambda: fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # noqa: E731
+        unlock = lambda: fcntl.flock(fh.fileno(), fcntl.LOCK_UN)  # noqa: E731
+    except ImportError:  # native Windows Python
+        import msvcrt
+        lock = lambda: (fh.seek(0), msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1))  # noqa: E731
+        unlock = lambda: (fh.seek(0), msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1))  # noqa: E731
+    try:
         while True:
             try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock()
                 break
-            except BlockingIOError:
+            except (BlockingIOError, PermissionError, OSError):
                 if time.monotonic() > deadline:
                     raise DPError(f"timed out waiting for lock {p}")
                 time.sleep(0.05)
         yield
     finally:
         with contextlib.suppress(OSError):
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            unlock()
         fh.close()
 
 
@@ -133,10 +140,34 @@ def with_checksum(payload: dict) -> dict:
     return clean
 
 
-def emit(payload: dict, code: int = 0) -> int:
-    sys.stdout.write(json.dumps(with_checksum(payload), ensure_ascii=True, sort_keys=True) + "\n")
+def emit_line(payload: dict) -> str:
+    """One JSON line with checksum. Raw UTF-8 (not \\uXXXX escapes): the relaying model copies real
+    characters more reliably than escape sequences; the checksum is computed over the canonical
+    ASCII form of the parsed values, so the transport encoding does not matter."""
+    return json.dumps(with_checksum(payload), ensure_ascii=False, sort_keys=True)
+
+
+def write_stdout(line: str) -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to a legacy code page
+    except (AttributeError, ValueError):
+        pass
+    sys.stdout.write(line + "\n")
     sys.stdout.flush()
+
+
+def emit(payload: dict, code: int = 0) -> int:
+    write_stdout(emit_line(payload))
     return code
+
+
+def relay_text(value, limit: int = 240):
+    """Shorten free text for the relay (full text stays in the run files)."""
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[: limit - 1] + "…"
+    if isinstance(value, list):
+        return [relay_text(v, limit) for v in value[:8]]
+    return value
 
 
 def decode_b64_json(value: str | None, default: Any = None) -> Any:

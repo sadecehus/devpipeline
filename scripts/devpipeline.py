@@ -36,7 +36,8 @@ from dpcore import issues as issuemod  # noqa: E402
 from dpcore.dag import blocked_by_failure, path_owned  # noqa: E402
 from dpcore.jsonschema_lite import validate_named  # noqa: E402
 from dpcore.selection import detect_features, merge_features, select_agents  # noqa: E402
-from dpcore.util import DPError, atomic_write_json, decode_b64_json, emit, file_lock, now_iso, read_json  # noqa: E402
+from dpcore.util import (DPError, atomic_write_json, atomic_write_text, decode_b64_json, emit, emit_line, file_lock,  # noqa: E402
+                         now_iso, read_json, relay_text, write_stdout)
 import quality_gate  # noqa: E402
 import report_generator  # noqa: E402
 import run_checks  # noqa: E402
@@ -44,7 +45,10 @@ import state_manager as sm  # noqa: E402
 import validate_contracts as vc  # noqa: E402
 import worktree_manager as wm  # noqa: E402
 
-QA_KINDS = cfgmod.qa_kinds()  # single source: config/agent-registry.json report_kind
+QA_KINDS = cfgmod.qa_kinds()
+# Bump when the JSON contract between workflows/*.js and these helpers changes. The plugin is read
+# from its folder, so helpers can be newer than a workflow that is already running.
+PROTOCOL = 2  # single source: config/agent-registry.json report_kind
 DOC_SCOPE = ["*.md", "**/*.md", "docs/", ".env.example", "LICENSE"]
 PLANNING_FILES = ["requirements.json", "PRD.md", "architecture.json", "ARCHITECTURE.md", "tasks.json", "adr/", "contracts/",
                   "acceptance-matrix.md", "contract-changes.json"]
@@ -73,7 +77,8 @@ def save_tasks(project: Path, run_id: str, tasks: list[dict]) -> None:
 
 
 def compact(t: dict) -> dict:
-    return {"id": t["id"], "agent": t["agent"], "title": t["title"], "kind": t.get("kind", "implementation"),
+    """What the workflow needs for scheduling — no free text (titles stay in tasks.json)."""
+    return {"id": t["id"], "agent": t["agent"], "kind": t.get("kind", "implementation"),
             "deps": t.get("dependencies", []), "status": t["status"], "attempt": t["attempt"]}
 
 
@@ -127,9 +132,53 @@ def sync_task_map(project: Path, run_id: str, tasks: list[dict], **manifest_upda
 
 
 # -------------------------------------------------------- main session ----
+def _invocation() -> str:
+    import secrets
+    return secrets.token_hex(4)  # distinguishes workflow invocations for the op cache
+
+
+def op_relay_failure(project: Path, run_id: str, op_key: str, relayed: dict) -> dict:
+    """Store what the relay delivered next to what the helper really printed (diagnostics)."""
+    ops = sm.run_dir(project, run_id) / "ops"
+    true_line = (ops / f"{op_key}.json").read_text() if (ops / f"{op_key}.json").exists() else ""
+    truth = json.loads(true_line) if true_line else {}
+    diffs = []
+
+    def walk(a, b, path="$"):
+        if len(diffs) >= 20:
+            return
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                if k not in a or k not in b:
+                    diffs.append(f"{path}.{k}: {'missing in relay' if k not in b else 'extra in relay'}")
+                else:
+                    walk(a[k], b[k], f"{path}.{k}")
+        elif isinstance(a, list) and isinstance(b, list):
+            if len(a) != len(b):
+                diffs.append(f"{path}: list length {len(a)} vs relayed {len(b)}")
+            for i, (x, y) in enumerate(zip(a, b)):
+                walk(x, y, f"{path}[{i}]")
+        elif a != b:
+            diffs.append(f"{path}: {json.dumps(a, ensure_ascii=False)[:80]} != relayed {json.dumps(b, ensure_ascii=False)[:80]}")
+
+    walk(truth, relayed)
+    path = ops / f"relay-failure-{op_key}.json"
+    atomic_write_json(path, {"op_key": op_key, "at": now_iso(), "differences": diffs, "true_output": truth, "relayed": relayed})
+    sm.event(project, run_id, "RELAY_INTEGRITY_FAILED", detail=f"{op_key}: {'; '.join(diffs[:3])}")
+    return {"ok": True, "diagnostics": str(path), "differences": len(diffs)}
+
+
 def cmd_prepare(a) -> dict:
     project = P(a.project)
     has_content = project.exists() and any(p for p in project.iterdir() if p.name not in (".devpipeline", ".git", ".DS_Store", ".gitignore"))
+    if a.reuse_plan:
+        for f in ("requirements.json", "architecture.json", "tasks.json"):
+            if not (project / ".devpipeline" / f).exists():
+                raise DPError(f"--reuse-plan: .devpipeline/{f} is missing; run a normal build instead")
+        if not a.request and not a.request_file:
+            prev = sorted((project / ".devpipeline" / "runs").glob("*/request.txt"))
+            if prev:
+                a.request_file = str(prev[-1])
     if a.new and has_content:
         raise DPError(f"{project} already contains files; refusing to scaffold a new project over it — use improve mode")
     new = not has_content
@@ -149,7 +198,8 @@ def cmd_prepare(a) -> dict:
     return {"ok": True, "run_id": m["run_id"], "project_dir": str(project), "project_mode": m["project_mode"],
             "profile": m["config"]["profile"], "workflow_script": str(script),
             "workflow_args": {"plugin_root": str(ROOT), "project_dir": str(project), "run_id": m["run_id"],
-                              "agent_prefix": "devpipeline:", "started_at": m["started_at"],
+                              "agent_prefix": "devpipeline:", "started_at": m["started_at"], "invocation": _invocation(),
+                              **({"reuse_plan": True} if a.reuse_plan else {}),
                               **({"source_run": a.source_run, "issue_ids": issue_ids} if a.mode == "repair" else {})}}
 
 
@@ -167,7 +217,7 @@ def cmd_resume(a) -> dict:
     script = ROOT / "workflows" / f"{m['mode']}-project.js"
     return {"ok": True, **chk, "workflow_script": str(script),
             "workflow_args": {"plugin_root": str(ROOT), "project_dir": str(project), "run_id": chk["run_id"],
-                              "agent_prefix": "devpipeline:", "resume": True,
+                              "agent_prefix": "devpipeline:", "resume": True, "invocation": _invocation(),
                               **({"source_run": m["repair_scope"]["source_run"], "issue_ids": m["repair_scope"]["issue_ids"]}
                                  if m.get("repair_scope") else {})}}
 
@@ -326,10 +376,10 @@ def op_start_tasks(project: Path, run_id: str, ids: list[str]) -> dict:
         if result_path.exists():
             result_path.rename(result_path.with_suffix(f".attempt{t['attempt'] - 1}.json"))
         active[tid] = {"agent": t["agent"], "worktree": info["worktree"], "owned_paths": t.get("owned_paths", []) + t.get("shared_paths", [])}
-        started.append({"task_id": tid, "agent": t["agent"], "title": t["title"], "worktree": info["worktree"],
+        started.append({"task_id": tid, "agent": t["agent"], "title": relay_text(t["title"], 120), "worktree": info["worktree"],
                         "result_path": str(result_path), "owned_paths": t.get("owned_paths", []), "attempt": t["attempt"],
                         "kind": t.get("kind", "implementation"), "issue_ids": t.get("issue_ids", []),
-                        "failure_reason": t.get("failure_reason", "")})
+                        "failure_reason": relay_text(t.get("failure_reason", ""), 300)})
         sm.event(project, run_id, "TASK_STARTED", agent=t["agent"], task_id=tid, detail=f"attempt {t['attempt']}")
     save_tasks(project, run_id, [{k: v for k, v in t.items() if not k.startswith("_")} for t in tasks])
     # snapshots for serial mode are kept in active.json (not part of task schema)
@@ -363,6 +413,46 @@ def verify_user_checkout(project: Path, run_id: str, scope: str) -> list[str]:
     return changed
 
 
+def normalize_result(path: Path, run_id: str, task_id: str, agent: str) -> dict | None:
+    """Repair harmless shape mistakes so a correct piece of work is not thrown away.
+
+    Fills identity fields the coordinator knows (run_id, task_id, agent), converts string artifacts
+    to objects, moves unknown validation keys into `summary`/`evidence_path`, and defaults empty
+    lists. Status, summary and validation results are never invented; the file is rewritten so the
+    normalised version is what the gate later reads.
+    """
+    try:
+        res = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(res, dict):
+        return None
+    if res.get("task_id") not in (None, task_id) or res.get("agent") not in (None, agent) or res.get("run_id") not in (None, run_id):
+        return res  # identity conflicts are real errors — leave them for validation
+    res.update({"run_id": run_id, "task_id": task_id, "agent": agent})
+    for key in ("changed_files", "validation", "issues", "artifacts", "requirements"):
+        if res.get(key) is None:
+            res[key] = []
+    res["artifacts"] = [{"path": a} if isinstance(a, str) else a for a in res["artifacts"]]
+    allowed = {"name", "status", "exit_code", "command", "cwd", "evidence_path", "summary"}
+    fixed = []
+    for v in res["validation"]:
+        if not isinstance(v, dict):
+            continue
+        extra = {k: v.pop(k) for k in list(v) if k not in allowed}
+        if extra:
+            ev = extra.get("evidence") or extra.get("log") or extra.get("log_path")
+            if isinstance(ev, str) and "evidence_path" not in v:
+                v["evidence_path"] = ev
+            rest = {k: x for k, x in extra.items() if k not in ("evidence", "log", "log_path")}
+            if rest:
+                v["summary"] = (str(v.get("summary", "")) + " " + json.dumps(rest, ensure_ascii=False))[:500].strip()
+        fixed.append(v)
+    res["validation"] = fixed
+    atomic_write_json(path, res)
+    return res
+
+
 def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) -> dict:
     m = sm.load_manifest(project, run_id)
     cfg = m["config"]
@@ -375,7 +465,7 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
     for tid in ids:
         t = by_id[tid]
         rpath = sm.run_dir(project, run_id) / "agent-results" / f"{tid}.json"
-        result = read_json(rpath) if rpath.exists() else None
+        result = normalize_result(rpath, run_id, tid, t["agent"]) if rpath.exists() else None
         check = vc.check_result(result, tid, t["agent"], run_id)
         errors = list(check["errors"])
         if returned.get(tid) is None and result is None:
@@ -416,7 +506,7 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
             merged = True
         sm.event(project, run_id, "TASK_COMPLETED" if status == "COMPLETED" else "TASK_FAILED", agent=t["agent"], task_id=tid,
                  status=status, detail=t["failure_reason"][:300] or None)
-        out.append({"id": tid, "status": status, "retry": retry, "merged": merged, "errors": errors[:5], "changed": len(changed)})
+        out.append({"id": tid, "status": status, "retry": retry, "merged": bool(merged), "errors": relay_text(errors[:3], 200), "changed": len(changed)})
     checkout_changes = verify_user_checkout(project, run_id, "finish-tasks")
     if checkout_changes:
         for r in out:
@@ -431,8 +521,9 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
     if iso == "worktree":
         with sm.mutate(project, run_id) as mm:
             mm["source"]["integration_head"] = gitutil.head(integ)
+    changed_ids = set(ids) | set(newly_blocked)
     return {"ok": True, "results": out, "conflicts": conflicts, "newly_blocked": newly_blocked,
-            "tasks": [compact(t) for t in tasks]}
+            "updates": [{"id": t["id"], "status": t["status"], "attempt": t["attempt"]} for t in tasks if t["id"] in changed_ids]}
 
 
 def op_verify_merge(project: Path, run_id: str, ids: list[str]) -> dict:
@@ -440,6 +531,7 @@ def op_verify_merge(project: Path, run_id: str, ids: list[str]) -> dict:
     integ = Path(m["source"]["integration_worktree"])
     tasks = load_tasks(project, run_id)
     res = []
+    before = {t["id"]: t["status"] for t in tasks}
     for t in tasks:
         if t["id"] not in ids:
             continue
@@ -455,7 +547,8 @@ def op_verify_merge(project: Path, run_id: str, ids: list[str]) -> dict:
     sync_task_map(project, run_id, tasks)
     with sm.mutate(project, run_id) as mm:
         mm["source"]["integration_head"] = gitutil.head(integ)
-    return {"ok": True, "results": res, "tasks": [compact(t) for t in tasks]}
+    return {"ok": True, "results": res,
+            "updates": [{"id": t["id"], "status": t["status"], "attempt": t["attempt"]} for t in tasks if before.get(t["id"]) != t["status"]]}
 
 
 def op_integration_status(project: Path, run_id: str) -> dict:
@@ -787,6 +880,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--profile", choices=["fast", "balanced", "strict"])
     ap.add_argument("--overrides-json")
     ap.add_argument("--new", action="store_true")
+    ap.add_argument("--reuse-plan", action="store_true")
     ap.add_argument("--approve-note")
     ap.add_argument("--to")
     ap.add_argument("--reason", default="")
@@ -802,6 +896,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--iteration", type=int, default=1)
     ap.add_argument("--status")
     ap.add_argument("--awaiting", choices=["questions", "plan"])
+    ap.add_argument("--op-key")
+    ap.add_argument("--protocol", type=int)
+    ap.add_argument("--relayed-b64")
     ap.add_argument("--source-run")
     ap.add_argument("--issues", default="")
     a = ap.parse_args(argv)
@@ -821,6 +918,21 @@ def main(argv: list[str]) -> int:
             raise DPError("--run is required")
         ids = [x for x in a.tasks.split(",") if x]
         sm.load_manifest(project, a.run)
+        if a.protocol is not None and a.protocol != PROTOCOL:
+            return emit({"ok": False, "protocol_mismatch": True, "error":
+                         f"DevPipeline was updated while this run was in progress (workflow protocol {a.protocol}, helpers {PROTOCOL}). "
+                         "Nothing was changed; resume the run to continue with the updated workflow."})
+        legacy = a.protocol is None  # workflows from before the handshake expect full task lists
+        if a.command == "relay-failure":
+            return emit(op_relay_failure(project, a.run, a.op_key or "", decode_b64_json(a.relayed_b64, {})))
+        cache = None
+        if a.op_key:
+            if not all(c.isalnum() or c in "-_" for c in a.op_key):
+                raise DPError("invalid --op-key")
+            cache = sm.run_dir(project, a.run) / "ops" / f"{a.op_key}.json"
+            if cache.exists():  # a relay retry: return the recorded result, never execute an operation twice
+                write_stdout(cache.read_text().strip())
+                return 0
         with sm.mutate(project, a.run) as mm:
             mm["counters"]["operator_calls"] += 1
         ops = {
@@ -844,7 +956,14 @@ def main(argv: list[str]) -> int:
         }
         if a.command not in ops:
             raise DPError(f"unknown command '{a.command}'")
-        return emit(ops[a.command]())
+        result = ops[a.command]()
+        if legacy and a.command in ("finish-tasks", "verify-merge"):
+            result["tasks"] = [compact(t) for t in load_tasks(project, a.run)]
+        line = emit_line(result)
+        if cache is not None:
+            atomic_write_text(cache, line + "\n")
+        write_stdout(line)
+        return 0
     except DPError as exc:
         return emit({"ok": False, "error": str(exc)}, 1)
 

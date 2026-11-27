@@ -1,7 +1,7 @@
 ---
 name: build-project
 description: "Build a new software project from a natural-language idea (Turkish or English) with the DevPipeline multi-agent team: requirements, architecture, parallel implementation in git worktrees, independent QA/security/AI evaluation, deterministic quality gates and bounded repair loops."
-argument-hint: "<project idea> [--dir PATH] [--profile fast|balanced|strict] [--frontend X] [--backend X] [--database X] [--ai-framework X] [--max-iterations N] [--concurrency N]"
+argument-hint: "<project idea> [--dir PATH] [--reuse-plan] [--profile fast|balanced|strict] [--frontend X] [--backend X] [--database X] [--ai-framework X] [--max-iterations N] [--concurrency N]"
 disable-model-invocation: true
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/devpipeline.py *), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.py *)
 ---
@@ -23,6 +23,7 @@ The user typed `/devpipeline:build-project …` or explicitly asked DevPipeline 
    - `--profile` (default `balanced`; words like "hızlı/prototip/fast" → `fast`, "production/strict/güvenlik kritik" → `strict`);
    - stack options (`--frontend`, `--backend`, `--database`, `--ai-framework`) and stack names written in the idea (e.g. "Next.js, FastAPI, PostgreSQL, pgvector, LangGraph");
    - `--max-iterations N` → `max_repair_iterations`, `--concurrency N` → `max_parallel_agents` (1–16).
+   - `--reuse-plan` → the directory already holds a validated plan from an earlier run that stopped (`.devpipeline/requirements.json`, `architecture.json`, `tasks.json`): pass `--reuse-plan` to `prepare` (and drop `--new`); the idea text may be omitted (the earlier request is reused). Analyst and architect are skipped when the existing files validate.
    Use defaults for anything not given; do not ask about non-essential preferences.
 2. **Compose the request text**: the original idea verbatim, followed by a line `Stack preferences: frontend=…, backend=…, database=…, ai_framework=…` for the stack choices you extracted (omit unknown ones).
 3. **Prepare the run** (creates `.devpipeline/`, run id, config snapshot; nothing is generated yet):
