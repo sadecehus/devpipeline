@@ -249,8 +249,9 @@ def eval_report(g: dict, ctx: Context, open_issues: list[dict]) -> dict:
                 notes.append(f"{c['name']}: live evaluation NOT_RUN (policy {policy}); mock results do not establish real model quality")
                 continue
         statuses.append(st)  # agents cannot mark their own checks optional
-        if st == "PASS" and c.get("evidence_type", "executed") in ("executed", "observed", "static_analysis"):
-            counted_pass += 1
+        ran = c.get("exit_code") == 0 and any(resolve_evidence(x, ctx.evidence_bases) for x in [c.get("log_path")] + list(c.get("artifacts") or []))
+        if st == "PASS" and (c.get("evidence_type", "executed") in ("executed", "observed", "static_analysis") or ran):
+            counted_pass += 1  # a deterministic eval run against a fake model is labelled "mock" by agents, but it was executed
     for scanner in rep.get("scanners", []):
         if scanner.get("ran") is False and scanner.get("status") == "PASS":
             statuses.append("ERROR")
@@ -274,6 +275,33 @@ def eval_report(g: dict, ctx: Context, open_issues: list[dict]) -> dict:
     order = ["FAIL", "ERROR", "BLOCKED", "SKIPPED", "NOT_RUN"]
     status = next((s for s in order if s in statuses), "PASS")
     return {"status": status, "reason": "; ".join(dict.fromkeys(notes)) or f"{kind} report PASS", "evidence": [str(f)]}
+
+
+def eval_tasks(ctx: Context, issues: list[dict]) -> dict:
+    """All tasks COMPLETED. A FAILED/BLOCKED repair or contract task does not block once none of its issues is still
+    open: a repair is a means to resolve issues, and an issue fixed by another task (or vanished) needs no retry."""
+    idir = ctx.rd / "issues"
+    still_open = {i["id"] for i in issues if i["status"] in ("OPEN", "IN_REPAIR", "PRE_EXISTING")}
+    for f in idir.glob("ISSUE-*.json"):
+        try:
+            if read_json(f).get("status") in ("OPEN", "IN_REPAIR") and f.stem not in {i["id"] for i in issues}:
+                still_open.add(f.stem)
+        except DPError:
+            continue
+    bad, moot = [], []
+    for t in ctx.tasks:
+        if t["status"] == "COMPLETED" or (t["status"] == "CANCELLED" and str(t.get("failure_reason", "")).startswith("superseded")):
+            continue
+        if t.get("kind") in ("repair", "contract") and t["status"] in ("FAILED", "BLOCKED") and t.get("issue_ids") \
+                and not set(t["issue_ids"]) & still_open:
+            moot.append(t["id"])
+            continue
+        bad.append(t["id"] + ":" + t["status"])
+    if not ctx.tasks:
+        return {"status": "FAIL", "reason": "no tasks"}
+    if bad:
+        return {"status": "FAIL", "reason": "incomplete tasks: " + ", ".join(bad)}
+    return {"status": "PASS", "reason": "all tasks completed" + (f" (failed repairs whose issues are resolved: {', '.join(moot)})" if moot else "")}
 
 
 def eval_review(g: dict, ctx: Context) -> dict:
@@ -565,7 +593,7 @@ def evaluate(project: Path, run_id: str) -> dict:
             results[g["id"]] = {"id": g["id"], "status": "NOT_RUN", "mandatory": False, "level": level, "reason": "disabled by profile (" + why + ")"}
             continue
         src = g["source"]
-        if src in ("issues", "report"):
+        if src in ("issues", "report", "tasks"):  # tasks: a failed repair task is judged by the state of its issues
             deferred.append((g, level, lwhy, why))
             continue
         if src == "checks":
@@ -578,11 +606,6 @@ def evaluate(project: Path, run_id: str) -> dict:
                    "reason": "plan validated" if pv and pv.get("valid") else "plan not validated"}
             if ctx.mode == "audit" and not pv:
                 res = {"status": "NOT_APPLICABLE", "reason": "audit mode has no task plan"}
-        elif src == "tasks":
-            bad = [t["id"] + ":" + t["status"] for t in ctx.tasks if t["status"] != "COMPLETED"
-                   and not (t["status"] == "CANCELLED" and str(t.get("failure_reason", "")).startswith("superseded"))]
-            res = {"status": "FAIL" if bad or not ctx.tasks else "PASS",
-                   "reason": ("incomplete tasks: " + ", ".join(bad)) if bad else ("no tasks" if not ctx.tasks else "all tasks completed")}
         elif src == "coverage":
             res = eval_coverage(ctx)
         elif src == "documentation":
@@ -595,7 +618,9 @@ def evaluate(project: Path, run_id: str) -> dict:
     issues = sync_issues(ctx, observations, fresh)
     open_issues = [i for i in issues if i["status"] == "OPEN"]
     for g, level, lwhy, why in deferred:
-        if g["source"] == "report":
+        if g["source"] == "tasks":
+            res = eval_tasks(ctx, issues)
+        elif g["source"] == "report":
             res = eval_report(g, ctx, open_issues)
         else:
             blocking = [i for i in open_issues if i["blocking"]]

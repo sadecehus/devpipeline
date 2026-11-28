@@ -347,6 +347,39 @@ def execute(check: dict, root: Path, log_dir: Path, label: str, timeout: int, fi
     return rec
 
 
+def _tree_state(target: Path) -> dict | None:
+    """HEAD plus the content of files already changed before the checks (None outside git)."""
+    if not gitutil.is_repo(target):
+        return None
+    head = gitutil.head(target)
+    dirty = {}
+    for rel in gitutil.changed_files(target, head) if head else []:
+        f = target / rel
+        dirty[rel] = f.read_bytes() if f.is_file() and f.stat().st_size < 5_000_000 else None
+    return {"head": head, "dirty": dirty}
+
+
+def _restore_side_effects(target: Path, before: dict | None) -> list[str]:
+    """Undo what the check tools themselves wrote into the tree (e.g. Next.js rewrites next-env.d.ts on every
+    build/dev, differently for each). Left in place it changes the code fingerprint after the evidence was taken
+    (every check reads as stale) and the next QA/docs commit picks it up as an out-of-scope edit."""
+    if not before or not before.get("head"):
+        return []
+    restored = []
+    for rel in gitutil.changed_files(target, before["head"]):
+        f = target / rel
+        if rel not in before["dirty"]:  # changed by a check: back to HEAD (or removed if the check created it)
+            if gitutil.git(target, "cat-file", "-e", f"{before['head']}:{rel}", check=False).returncode == 0:
+                gitutil.git(target, "checkout", before["head"], "--", rel, check=False)
+            elif f.is_file() or f.is_symlink():
+                f.unlink()
+            restored.append(rel)
+        elif before["dirty"][rel] is not None and f.is_file() and f.read_bytes() != before["dirty"][rel]:
+            f.write_bytes(before["dirty"][rel])  # was already dirty: back to its pre-check content
+            restored.append(rel)
+    return restored
+
+
 def run(project: Path, run_id: str, label: str, target: Path | None = None, only: list[str] | None = None,
         baseline: bool = False) -> dict:
     project = Path(project).resolve()
@@ -356,6 +389,7 @@ def run(project: Path, run_id: str, label: str, target: Path | None = None, only
     arch = read_json(project / ".devpipeline" / "architecture.json", default={}) if (project / ".devpipeline" / "architecture.json").exists() else {}
     timeout = manifest["config"].get("check_timeout_seconds", 900)
     fingerprint = gitutil.tree_fingerprint(target)
+    before = _tree_state(target)
     checks = discover(target, arch)
     # install first so later checks have dependencies
     checks.sort(key=lambda c: (0 if c["kind"] == "install" else 1, c["name"]))
@@ -377,17 +411,21 @@ def run(project: Path, run_id: str, label: str, target: Path | None = None, only
         if c["kind"] == "install" and r["status"] != "PASS":
             failed_install_dirs.add(c["cwd"])
         results.append(r)
+    side_effects = _restore_side_effects(target, before)
     statuses = [r["status"] for r in results]
     overall = "FAIL" if "FAIL" in statuses else "ERROR" if "ERROR" in statuses else "PASS"
     report = {"run_id": run_id, "agent": "pipeline-operator", "kind": "baseline" if baseline else "checks",
               "source_fingerprint": fingerprint, "status": overall, "checks": results, "issues": [],
-              "summary": f"{len(results)} checks: " + ", ".join(f"{s}={statuses.count(s)}" for s in sorted(set(statuses))),
+              "summary": f"{len(results)} checks: " + ", ".join(f"{s}={statuses.count(s)}" for s in sorted(set(statuses)))
+                         + (f"; restored files the check tools rewrote: {', '.join(side_effects[:10])}" if side_effects else ""),
               "created_at": now_iso()}
     name = f"{'baseline' if baseline else 'checks'}-{label}.json"
     atomic_write_json(rd / "test-reports" / name, report)
     import state_manager as sm  # record provenance: only coordinator-recorded check reports count as evidence
     with sm.mutate(project, run_id) as mm:
         mm.setdefault("check_reports", []).append(f"test-reports/{name}")
+    if side_effects:
+        sm.event(project, run_id, "CHECK_SIDE_EFFECTS_RESTORED", detail=", ".join(side_effects[:20]))
     return {"ok": True, "report": f"test-reports/{name}", "status": overall, "fingerprint": fingerprint,
             "checks": [{"name": r["name"], "kind": r["kind"], "status": r["status"],
                         **({"tests_total": r.get("tests_total"), "tests_skipped": r.get("tests_skipped")} if r.get("tests_total") is not None else {})}

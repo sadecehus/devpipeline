@@ -40,7 +40,7 @@ Write them into the report `thresholds`. Defaults (override from requirements):
 - Latency: measured with the fake model = orchestration overhead only; with live model = lab latency (not production).
 
 ## Step 5 — report
-Report kind `ai_eval` (test-report schema): one check per metric with value vs threshold, sample size, command, exit code, log path; issues for each failing metric routed to `ai-engineer` (prompts, retrieval, routing) or `backend-engineer` (authorization, transport). Mark `evidence_type: "mock"` for fake-model results and `llm_judgment` for judge scores.
+Report kind `ai_eval` (test-report schema): one check per metric with value vs threshold, sample size, command, exit code, log path; issues for each failing metric routed to `ai-engineer` (prompts, retrieval, routing) or `backend-engineer` (authorization, transport). A deterministic evaluation you ran (even against a fake/recorded model) is `evidence_type: "executed"` with command, exit code and log; use `"mock"` only for a result that was not produced by running anything, and `llm_judgment` for judge scores. The gate counts executed deterministic checks; live checks follow `live_ai_evaluation`.
 
 ## Anti-patterns
 Tuning on the test set; changing thresholds after seeing results; reporting mock results as model quality; single-example "evaluations"; judge prompts that leak the expected answer; ignoring adversarial categories.

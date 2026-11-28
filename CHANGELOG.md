@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7 — 2026-11-28
+### Fixed (istanbul-reels resume review: blockers no repair could clear)
+- Check tools that rewrite tracked files (Next.js `next-env.d.ts` differs between `next dev` and `next build`) made every check report stale (fingerprint taken before the build) and every QA step raised a new blocking "outside allowed paths" issue. The runner now restores what the check tools changed; QA/docs commits revert out-of-scope edits and report them (`OWNERSHIP_REVERTED`) instead of blocking.
+- A FAILED repair task no longer blocks `task_completion` once none of its issues is open.
+- AI evaluation: deterministic evals executed against a fake model (exit 0 + log) count as evidence even when labelled `mock`; the skill no longer tells agents to label them `mock`. Without this the gate could never pass with `live_ai_evaluation: optional`.
+- Security skill/agent: dependency audits cover production dependencies with a scope (`npm audit --omit=dev`, `pip-audit -r requirements.txt`); dev-only advisories are non-blocking issues instead of a failing check in a mandatory gate.
+
 ## 0.1.6 — 2026-11-28
 ### Fixed (bist-bot field report from Windows: run could not reach COMPLETED)
 - **Resume re-reads limits** (`max_agent_calls`, other `max_*`, timeouts, routing) from `.devpipeline/config.json` overrides (and new `resume --overrides-json`); prepare-time CLI overrides are kept. A resume that would still be over budget refuses and starts nothing. `max_runtime_minutes` counts from the latest resume.

@@ -850,9 +850,20 @@ def op_commit_integration(project: Path, run_id: str, scope: str, message: str) 
     integ = Path(m["source"]["integration_worktree"])
     if m.get("isolation") == "read-only":
         return {"ok": True, "committed": False, "violations": []}
-    res = wm.commit_integration(integ, message)
     pcfg = read_json(sm.dp_dir(project) / "config.json")
     allowed = {"qa": pcfg.get("qa_write_paths", []), "docs": DOC_SCOPE}.get(scope)
+    reverted = []
+    if allowed is not None and gitutil.is_repo(integ) and gitutil.head(integ):
+        # QA/doc steps run builds and dev servers, which rewrite generated files (next-env.d.ts, AGENTS.md ...).
+        # Like stray task edits (INC-005) these are undone and reported instead of becoming an unfixable blocking issue.
+        outside = [f for f in gitutil.changed_files(integ, gitutil.head(integ)) if not path_owned(f, allowed)]
+        if outside:
+            reverted = wm.revert_paths(integ, gitutil.head(integ), outside)
+            with sm.mutate(project, run_id) as mm:
+                mm.setdefault("ownership_reverted", {}).setdefault(scope, [])
+                mm["ownership_reverted"][scope] = sorted(set(mm["ownership_reverted"][scope]) | set(reverted))
+            sm.event(project, run_id, "OWNERSHIP_REVERTED", detail=f"{scope} step: reverted changes outside its paths: {reverted[:10]}")
+    res = wm.commit_integration(integ, message)
     violations = [f for f in res["changed_files"] if allowed is not None and not path_owned(f, allowed)]
     with sm.mutate(project, run_id) as mm:
         mm["source"]["integration_head"] = res["head"]
@@ -863,7 +874,7 @@ def op_commit_integration(project: Path, run_id: str, scope: str, message: str) 
                 if v["scope"] != "user-checkout":
                     v["resolved"] = True  # integration engineer reviewed and committed the integrated state
     return {"ok": True, "committed": res["committed"], "changed": len(res["changed_files"]), "violations": violations[:20],
-            "head": res["head"]}
+            "reverted": reverted[:20], "head": res["head"]}
 
 
 def op_validate_reports(project: Path, run_id: str, expect: list[str]) -> dict:

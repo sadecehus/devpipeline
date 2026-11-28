@@ -233,5 +233,63 @@ class WindowsTests(unittest.TestCase):
         self.assertTrue((ROOT / "scripts" / Path(mcp["args"][0]).name).is_file())
 
 
+class IstanbulReelsResumeTests(unittest.TestCase):
+    """istanbul-reels: Next.js rewrites next-env.d.ts on every build/dev (INC-017)."""
+
+    def test_checks_restore_files_their_tools_rewrite(self):
+        f = GateFixture()
+        write(f.wt / "next-env.d.ts", "// build\n")
+        write(f.wt / "gen.js", "require('fs').writeFileSync('next-env.d.ts', '// dev\\n'); require('fs').writeFileSync('new-gen.txt', 'x')\n")
+        dp.wm.commit_integration(f.wt, "gen")
+        pkg = read_json(f.wt / "package.json")
+        pkg["scripts"]["build"] = "node gen.js"
+        write(f.wt / "package.json", pkg)
+        dp.wm.commit_integration(f.wt, "build script")
+        f.checks(); f.qa(); f.final()
+        self.assertEqual((f.wt / "next-env.d.ts").read_text(), "// build\n")
+        self.assertFalse((f.wt / "new-gen.txt").exists())
+        _, g = f.gate()
+        self.assertEqual(g["unit_tests"]["status"], "PASS", "evidence is not stale after the build rewrote a file")
+
+    def test_qa_commit_reverts_generated_files_instead_of_blocking(self):
+        f = GateFixture()
+        write(f.wt / "next-env.d.ts", "// dev\n")
+        write(f.wt / "test" / "b.test.js", "require('node:test')('b', () => {})\n")
+        out = dp.op_commit_integration(f.project, f.run, "qa", "qa")
+        self.assertEqual(out["violations"], [])
+        self.assertIn("next-env.d.ts", out["reverted"])
+        self.assertFalse(sm.load_manifest(f.project, f.run).get("ownership_violations"))
+        self.assertFalse(dp.gitutil.status_porcelain(f.wt), "test committed, generated file reverted")
+
+    def test_failed_repair_whose_issues_are_resolved_does_not_block(self):
+        f = GateFixture()
+        f.checks(); f.qa(); f.final()
+        write(f.rd / "issues" / "ISSUE-050.json", {"id": "ISSUE-050", "source_agent": "code-qa-engineer", "assigned_agent": "backend-engineer",
+              "severity": "high", "category": "functional", "description": "x", "blocking": True, "status": "RESOLVED"})
+        tasks = read_json(f.rd / "tasks.json")["tasks"]
+        tasks.append(task("TASK-912-R1", status="FAILED", kind="repair", issue_ids=["ISSUE-050"]))
+        write(f.rd / "tasks.json", {"tasks": tasks})
+        _, g = f.gate()
+        self.assertEqual(g["task_completion"]["status"], "PASS", g["task_completion"]["reason"])
+        write(f.rd / "issues" / "ISSUE-050.json", {**read_json(f.rd / "issues" / "ISSUE-050.json"), "status": "OPEN"})
+        _, g = f.gate()
+        self.assertEqual(g["task_completion"]["status"], "FAIL")
+
+    def test_executed_fake_model_eval_counts_as_evidence(self):
+        f = GateFixture(features={"backend": True, "ai": True})
+        f.checks(); f.qa(); f.final()
+        log = write(f.rd / "logs" / "ai-eval-det.log", "5 passed")
+        write(f.rd / "test-reports" / "ai_eval.json", {"run_id": f.run, "agent": "ai-evaluation-engineer", "kind": "ai_eval", "source_fingerprint": f.fps()["prod"],
+              "status": "PASS", "issues": [], "summary": "s", "checks": [
+                  {"name": "deterministic:topics-filter", "status": "PASS", "evidence_type": "mock", "exit_code": 0, "log_path": str(log)},
+                  {"name": "live:grounding", "status": "NOT_RUN", "evidence_type": "executed", "exit_code": None, "reason": "no credentials"}]})
+        _, g = f.gate()
+        self.assertEqual(g["ai_evaluation"]["status"], "PASS", g["ai_evaluation"]["reason"])
+        write(f.rd / "test-reports" / "ai_eval.json", {**read_json(f.rd / "test-reports" / "ai_eval.json"), "checks": [
+            {"name": "judge", "status": "PASS", "evidence_type": "mock"}]})
+        _, g = f.gate()
+        self.assertNotEqual(g["ai_evaluation"]["status"], "PASS", "a mock result that was never run is still not evidence")
+
+
 if __name__ == "__main__":
     unittest.main()
