@@ -57,6 +57,28 @@ Validate with `python3 scripts/validate_config.py --project <dir>`.
 | `gates.<id>` | `mandatory` / `optional` / `disabled` — a requirement AC whose verification method maps to a gate forces it mandatory |
 | `agents.<name>` | `required` / `disabled` — locked agents cannot be disabled |
 
+Limits and routing (`max_*`, `check_timeout_seconds`, `live_ai_evaluation`, `auto_accept_assumptions`, `model_routing`, `effort_routing`)
+are **re-read on every resume**, so raising `max_agent_calls` here and running `/devpipeline:resume-project` continues a
+BUDGET_EXHAUSTED run. Gate levels, agents and the profile stay as planned for the run.
+
+## Declaring check commands
+The check runner discovers commands from real files, never invents them:
+- **Node**: `package.json` scripts — `lint`, `typecheck`, `build`, `test`/`test:unit`, `test:integration`, `test:api`, `test:contract`, `test:e2e`, `test:a11y`.
+- **Python**: ruff/mypy/pytest when available; pytest suites in `tests/integration`, `tests/api`, `tests/contract`, `tests/e2e`, `e2e`,
+  `tests/accessibility`; and explicit declarations in `pyproject.toml` (a file the project's engineers own, so repair tasks can add them):
+  ```toml
+  [tool.devpipeline.checks]
+  e2e = "python -m pytest -q tests/e2e"
+  a11y-smoke = { kind = "accessibility", command = "python -m pytest -q tests/ui", timeout_seconds = 600 }
+  ```
+- **Architecture**: `.devpipeline/architecture.json` `checks[]` (Software Architect). Agents that need one there file a
+  `contract_change_requests` entry; it becomes an issue for the architect.
+
+A declared check replaces a discovered one with the same command, or with the same single-purpose tool, kind and directory
+(e.g. a declared `pip-audit -r requirements.txt` replaces the generic Python dependency audit). The Python dependency audit
+always has a scope (`-r requirements.txt` or the project in `pyproject.toml`); without one it is NOT_RUN instead of scanning
+the whole interpreter. Commands may not contain shell metacharacters (`;&|<>$` and backslashes): use forward slashes.
+
 ## Profiles
 - **fast** — minimal agents (no code reviewer, no performance), essential build/test, secret scan always on; lint/typecheck optional; never claims production readiness.
 - **balanced** (default) — full relevant team, security review, browser QA for web, AI evaluation for AI, code review, final review, 5 repairs.

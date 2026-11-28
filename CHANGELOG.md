@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.6 — 2026-11-28
+### Fixed (bist-bot field report from Windows: run could not reach COMPLETED)
+- **Resume re-reads limits** (`max_agent_calls`, other `max_*`, timeouts, routing) from `.devpipeline/config.json` overrides (and new `resume --overrides-json`); prepare-time CLI overrides are kept. A resume that would still be over budget refuses and starts nothing. `max_runtime_minutes` counts from the latest resume.
+- **Secret scan ran nowhere on Windows**: its own generated command (`python3 'C:\…\redact_secrets.py' scan .`) tripped the shell-metacharacter filter. It is now a built-in run with the helper's interpreter.
+- **Python dependency audit was unscoped** (`pip-audit` without arguments scans the whole interpreter: 224 conda/torch findings). Now `pip-audit -r requirements.txt` or `pip-audit .`; NOT_RUN when there is nothing to scope. A declared check with the same single-purpose tool, kind and directory replaces the discovered one, and the dependency-audit gate counts it.
+- **Mandatory integration/e2e/accessibility checks could not be added by any repair**: they could only be declared in architecture.json. Python projects can now declare checks in `pyproject.toml` (`[tool.devpipeline.checks]`), and pytest suites in `tests/integration|api|contract|e2e|accessibility` are discovered. The "no executable check" issue explains the exact options and its repair task owns the manifest/test folder.
+- **Contract change requests were rejected and went nowhere**: the prompt never gave their shape. Shape is in the task prompt and agent contract; `title/summary/file/why`-style entries are mapped; requests become issues for the Software Architect (blocking when the task could not finish), whose contract task may now also update `architecture.json` `checks`.
+- **PARTIAL repairs lost their work** (TASK-921-R2's ruff fix): a partial repair with changes is merged; the gate re-evaluates every issue.
+- **Missing agent results** cost a retry each: a result written relative to the worktree is moved; otherwise the agent's returned status/summary becomes a minimal result (no validation claims; checks still decide). Protocol 3.
+- **Error-path validations** ("exits 2 on a bad date") with `expected_exit_code` are a PASS; an unexplained PASS with non-zero exit is downgraded to ERROR instead of failing the task.
+- **Gate reasons**: report gates name the failing checks (no more "FAIL: code_qa report PASS"); evidence `log_path` is resolved relative to the run directory/worktree and Git-Bash paths.
+- **Windows**: Playwright MCP is started via `node scripts/mcp_npx.mjs` (bare `npx` gives "Connection closed"); `wait-checks` no longer probes with `os.kill(pid, 0)` (terminates the process on Windows); detached check jobs use Windows creation flags; reviewers could not write their verdicts (backslash path check in the hook guard); `%TEMP%` is a scratch root; `python3` falls back to the helper's interpreter.
+- **Startup**: `prepare --request-file -` reads stdin (`/dev/stdin` does not exist for Windows Python); `workflow_script` is a copy in `.devpipeline/runs/<run>/workflow/` so the Workflow tool accepts it without copying by hand.
+
 ## 0.1.5 — 2026-11-28
 ### Fixed (istanbul-reels resume ended BLOCKED in run-checks)
 - Check runs (≈450–570 s here) no longer have to fit into one relayed Bash call (600 s limit): `start-checks` launches a detached job and `wait-checks` waits in ≤ 9 min slices up to `max_check_wait_minutes` (default 180); a stuck suite ends BLOCKED with the job log path. Verified in the real runtime (a 20 s check outlived the relay that started it).

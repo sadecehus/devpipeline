@@ -102,6 +102,10 @@
               "null"
             ]
           },
+          "expected_exit_code": {
+            "type": "integer",
+            "description": "Exit code that means success for this validation (default 0), e.g. 2 for a test that checks a CLI rejects bad input."
+          },
           "command": {
             "type": "string"
           },
@@ -135,16 +139,20 @@
         "additionalProperties": false,
         "properties": {
           "contract": {
-            "type": "string"
+            "type": "string",
+            "description": "File the change is for, e.g. .devpipeline/contracts/api.yaml or .devpipeline/architecture.json"
           },
           "change": {
-            "type": "string"
+            "type": "string",
+            "description": "What should change"
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "description": "Why the task needs it"
           }
         }
-      }
+      },
+      "description": "A change to a planning file the agent does not own (contract, architecture.json checks, requirement). Routed to the Software Architect."
     },
     "blockers": {
       "type": "array",

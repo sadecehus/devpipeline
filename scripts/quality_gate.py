@@ -13,6 +13,7 @@ and ERROR never count as PASS. An LLM approval cannot override a failed check.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -89,6 +90,7 @@ class Context:
         req_path = self.project / ".devpipeline" / "requirements.json"
         self.requirements = read_json(req_path) if req_path.exists() else None
         self.latest_checks = self.check_reports[-1][1] if self.check_reports else None
+        self.evidence_bases = [self.rd, self.wt, self.project]
         self.detected_kinds = {c["kind"] for c in (self.latest_checks or {}).get("checks", []) if c.get("command") or c.get("status") == "FAIL"}
 
     def impl_count(self) -> int:
@@ -134,13 +136,39 @@ def level_for(g: dict, ctx: Context) -> tuple[str, str]:
     return level, why
 
 
-def _evidence_ok(check: dict) -> tuple[bool, str]:
+def resolve_evidence(raw: str | None, bases: list[Path]) -> Path | None:
+    """Find an evidence file as agents write it: absolute, relative to the run directory / worktree / project,
+    or a Git-Bash style path (/c/Users/...) on Windows."""
+    if not raw or not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    m = re.match(r"^/([a-zA-Z])/(.*)$", raw)
+    if os.name == "nt" and m:
+        raw = f"{m.group(1)}:/{m.group(2)}"
+    cand = Path(raw).expanduser()
+    if cand.is_absolute():
+        return cand if cand.is_file() else None
+    for base in bases:
+        if (base / cand).is_file():
+            return base / cand
+    return None
+
+
+def _evidence_ok(check: dict, bases: list[Path] | None = None) -> tuple[bool, str]:
     if check.get("evidence_type") == "executed" and check["status"] == "PASS":
         if check.get("exit_code") != 0:
             return False, "PASS without exit code 0"
-        if not check.get("log_path") or not Path(check["log_path"]).exists():
-            return False, "PASS without log evidence"
+        paths = [check.get("log_path")] + [a for a in check.get("artifacts", []) if isinstance(a, str)]
+        if not any(resolve_evidence(x, bases or []) for x in paths):
+            return False, (f"PASS without log evidence (log_path {check.get('log_path')!r} not found)" if check.get("log_path")
+                           else "PASS without log evidence (no log_path)")
     return True, ""
+
+
+def _is_audit(cmd: str | None) -> bool:
+    argv = (cmd or "").split()
+    from run_checks import _tool
+    return _tool(cmd) in ("pip-audit", "osv-scanner", "safety") or argv[:2] in (["npm", "audit"], ["pnpm", "audit"], ["yarn", "audit"])
 
 
 def eval_checks(g: dict, ctx: Context) -> dict:
@@ -153,7 +181,8 @@ def eval_checks(g: dict, ctx: Context) -> dict:
     if g.get("names"):
         checks = [c for c in checks if c["name"] in g["names"]]
     if g.get("names_prefix"):
-        checks = [c for c in checks if c["name"].startswith(g["names_prefix"])]
+        checks = [c for c in checks if c["name"].startswith(g["names_prefix"]) or
+                  (g["id"] == "dependency_audit" and _is_audit(c.get("command")))]  # declared audits replace discovered ones
     elif g["id"] == "secret_scan":
         pass
     elif "security" in g.get("kinds", []):
@@ -164,7 +193,7 @@ def eval_checks(g: dict, ctx: Context) -> dict:
     notes = []
     for c in checks:
         st = c["status"]
-        ok, why = _evidence_ok(c)
+        ok, why = _evidence_ok(c, ctx.evidence_bases)
         if not ok:
             st, why = "ERROR", why
             notes.append(f"{c['name']}: {why}")
@@ -205,10 +234,12 @@ def eval_report(g: dict, ctx: Context, open_issues: list[dict]) -> dict:
     counted_pass = 0
     for c in rep["checks"]:
         st = c["status"]
-        ok, why = _evidence_ok(c)
+        ok, why = _evidence_ok(c, ctx.evidence_bases)
         if not ok:
             st = "ERROR"
             notes.append(f"{c['name']}: {why}")
+        elif st not in ("PASS", "NOT_APPLICABLE") and not (kind == "ai_eval" and c["name"].startswith("live:")):
+            notes.append(f"{c['name']}: {st}" + (f" ({str(c['reason'])[:120]})" if c.get("reason") else ""))
         if kind == "ai_eval" and c["name"].startswith("live:") and st in ("NOT_RUN", "BLOCKED", "SKIPPED"):
             policy = ctx.cfg.get("live_ai_evaluation", "optional")
             if policy == "mandatory":
@@ -239,9 +270,10 @@ def eval_report(g: dict, ctx: Context, open_issues: list[dict]) -> dict:
         notes.append("browser QA has no executed/observed browser evidence")
     if rep["status"] != "PASS":
         statuses.append(rep["status"] if rep["status"] in ("FAIL", "ERROR", "BLOCKED", "SKIPPED", "NOT_RUN") else "FAIL")
+        notes.append(f"the {kind} report itself has status {rep['status']}")
     order = ["FAIL", "ERROR", "BLOCKED", "SKIPPED", "NOT_RUN"]
     status = next((s for s in order if s in statuses), "PASS")
-    return {"status": status, "reason": "; ".join(notes) or f"{kind} report PASS", "evidence": [str(f)]}
+    return {"status": status, "reason": "; ".join(dict.fromkeys(notes)) or f"{kind} report PASS", "evidence": [str(f)]}
 
 
 def eval_review(g: dict, ctx: Context) -> dict:
@@ -328,6 +360,55 @@ def _manifests(wt: Path) -> list[str]:
     return found[:5]
 
 
+def _how_to_add_check(kinds: list[str], wt: Path) -> tuple[str, list[str]]:
+    """Tell the repair agent exactly how the runner discovers a check of these kinds, in files it can own."""
+    reg = cfgmod.stack_registry()
+    manifests = _manifests(wt)
+    node = [s for k in kinds for s in reg["stacks"]["node"]["scripts"].get(k, [])]
+    pdirs = [d for d, k in reg["stacks"]["python"].get("test_dirs", {}).items() if k in kinds]
+    ways, files = [], list(manifests)
+    if any(m.endswith("package.json") for m in manifests) or not manifests:
+        ways.append("Node: add a package.json script named " + " or ".join(f"'{x}'" for x in node))
+    if any(m.endswith(("pyproject.toml", "requirements.txt")) for m in manifests):
+        py = [f"put pytest tests under {pdirs[0]}/ (discovered automatically)"] if pdirs else []
+        py.append(f"declare it in pyproject.toml as [tool.devpipeline.checks] {(kinds or ['custom'])[0]} = \"python -m pytest -q <path>\"")
+        ways.append("Python: " + " or ".join(py))
+        files += [d + "/" for d in pdirs[:1]] + ([] if "pyproject.toml" in manifests else ["pyproject.toml"])
+    ways.append("for any other stack, or if the requirement does not need this check, file a contract_change_requests entry "
+                "for .devpipeline/architecture.json (the Software Architect owns its `checks` and the acceptance criteria)")
+    return "The check runner finds such a check only from files: " + "; ".join(ways) + ".", sorted(set(files))
+
+
+def _contract_requests(ctx: Context) -> list[dict]:
+    """contract_change_requests in task results become issues for the Software Architect.
+
+    Blocking when the requesting task could not finish without it. A request is settled once a contract task that
+    covered its issue completed (the architect decided)."""
+    out = []
+    index_path = ctx.rd / "issues" / "index.json"
+    by_fp = (read_json(index_path, default={}) or {}).get("by_fingerprint", {}) if index_path.exists() else {}
+    settled = {iid for t in ctx.tasks if t.get("kind") == "contract" and t["status"] == "COMPLETED" for iid in t.get("issue_ids", [])}
+    for t in ctx.tasks:
+        f = ctx.rd / "agent-results" / f"{t['id']}.json"
+        try:
+            res = read_json(f) if f.exists() else {}
+        except DPError:
+            continue
+        for c in res.get("contract_change_requests") or []:
+            if not isinstance(c, dict) or not c.get("change"):
+                continue
+            blocking = res.get("status") != "COMPLETED"
+            o = {"source_ref": "contract_requests", "source_agent": t["agent"], "category": "contract",
+                 "severity": "high" if blocking else "medium", "check_name": f"contract-request:{c.get('contract', 'unspecified')}"[:200],
+                 "title": f"Contract change requested by {t['id']}: {c.get('contract', 'unspecified')}"[:200],
+                 "description": f"{c['change']} (reason: {c.get('reason', 'not given')})"[:2000], "affected_files": [],
+                 "blocking": blocking, "assigned_agent": "software-architect"}
+            fp = issuemod.normalize({k: v for k, v in o.items() if k != "source_ref"}, t["agent"])["fingerprint"]
+            if by_fp.get(fp) not in settled:
+                out.append(o)
+    return out
+
+
 def collect_observations(ctx: Context, gate_results: dict) -> tuple[list[dict], set[str]]:
     """Return (observed issues, set of source refs that were freshly evaluated)."""
     obs: list[dict] = []
@@ -372,6 +453,8 @@ def collect_observations(ctx: Context, gate_results: dict) -> tuple[list[dict], 
         fresh.add(f"review:{kind}")
         for i in rv.get("blocking_issues", []):
             obs.append({**i, "blocking": True, "source_ref": f"review:{kind}"})
+    fresh.add("contract_requests")
+    obs += _contract_requests(ctx)
     covered = {o.get("check_name") for o in obs}
     for gid, res in gate_results.items():
         if not res.get("mandatory") or res["status"] in ("PASS", "NOT_APPLICABLE") or gid in ("documentation", "final_review",
@@ -381,10 +464,12 @@ def collect_observations(ctx: Context, gate_results: dict) -> tuple[list[dict], 
             continue
         if "no " in res.get("reason", "") and "command discovered" in res.get("reason", ""):
             fresh.add(f"gate:{gid}")
+            kinds = next((g.get("kinds", []) for g in cfgmod.gates_config()["gates"] if g["id"] == gid), [])
+            how, files = _how_to_add_check(kinds, ctx.wt)
             obs.append({"source_ref": f"gate:{gid}", "source_agent": "pipeline-operator", "category": "test", "severity": "high",
                         "check_name": f"gate:{gid}", "title": f"Mandatory gate {gid} has no executable check",
-                        "description": f"{gid}: {res['reason']}. Add the missing project script/test suite (e.g. package.json script).",
-                        "affected_files": _manifests(ctx.wt), "blocking": True})
+                        "description": f"{gid}: {res['reason']}. {how}",
+                        "affected_files": files, "blocking": True})
     for gid in ("documentation",):
         res = gate_results.get(gid)
         fresh.add(f"gate:{gid}")

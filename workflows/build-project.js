@@ -90,7 +90,7 @@ function q(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
 // ------------------------------------------------------------ operator ----
 const OP_SCHEMA = { type: 'object', required: ['exit_code', 'output'], properties: { exit_code: { type: 'integer' }, output: { type: 'object' } } }
 
-const PROTOCOL = 2  // must equal PROTOCOL in scripts/devpipeline.py
+const PROTOCOL = 3  // must equal PROTOCOL in scripts/devpipeline.py
 let OP_SEQ = 0
 async function op(cmd, extra) {
   OP_SEQ++
@@ -290,10 +290,13 @@ function taskPrompt(s) {
   return header(s.task_id, s.worktree, s.result_path) + `\n
 Your task: ${s.task_id} "${s.title}" (attempt ${s.attempt}). Read its full definition in ${P().run_dir}/tasks.json.
 Owned paths (only these may change): ${JSON.stringify(s.owned_paths)}
-${repair ? `This is a REPAIR task for issues ${s.issue_ids.join(', ')} — read each in ${P().run_dir}/issues/<ID>.json. Fix root causes; never weaken tests, remove requirements or change contracts to make checks pass.\n` : ''}${s.kind === 'contract' ? `Contract task: update ${P().contracts}/ and append the change with reason to ${P().dp}/contract-changes.json; do not edit application code.\n` : ''}${s.failure_reason ? `Previous attempt was rejected: ${s.failure_reason}\n` : ''}${s.previous_attempt_branch ? `The previous attempt's work is preserved on branch ${s.previous_attempt_branch}. Reuse it instead of starting over: inspect \`git diff HEAD ${s.previous_attempt_branch} -- <owned paths>\` and restore what is correct with \`git checkout ${s.previous_attempt_branch} -- <path>\` (only inside your owned paths), then fix what was rejected.\n` : ''}Do not commit — the coordinator commits your worktree and merges it. Finish by writing the agent-result JSON to the result path and returning it.
+${repair ? `This is a REPAIR task for issues ${s.issue_ids.join(', ')} — read each in ${P().run_dir}/issues/<ID>.json. Fix root causes; never weaken tests, remove requirements or change contracts to make checks pass.\n` : ''}${s.kind === 'contract' ? `Contract task: decide each request in the issues. Update ${P().contracts}/, ${P().dp}/architecture.json (e.g. its \`checks\`) or requirements as needed and append every decision with its reason to ${P().dp}/contract-changes.json; do not edit application code.\n` : ''}${s.failure_reason ? `Previous attempt was rejected: ${s.failure_reason}\n` : ''}${s.previous_attempt_branch ? `The previous attempt's work is preserved on branch ${s.previous_attempt_branch}. Reuse it instead of starting over: inspect \`git diff HEAD ${s.previous_attempt_branch} -- <owned paths>\` and restore what is correct with \`git checkout ${s.previous_attempt_branch} -- <path>\` (only inside your owned paths), then fix what was rejected.\n` : ''}Do not commit — the coordinator commits your worktree and merges it. Finish by writing the agent-result JSON to the result path and returning it.
 Required shape (schema ${P().schemas}/agent-result.schema.json — no extra keys):
 {"run_id": "${DP.run_id}", "task_id": "${s.task_id}", "agent": "${s.agent}", "status": "COMPLETED", "requirements": [], "changed_files": ["<path>"], "artifacts": [{"path": "<file>", "kind": "doc"}],
- "validation": [{"name": "unit", "status": "PASS", "exit_code": 0, "command": "<cmd>", "evidence_path": "<log path>"}], "issues": [], "summary": "<one paragraph>"}`
+ "validation": [{"name": "unit", "status": "PASS", "exit_code": 0, "command": "<cmd>", "evidence_path": "<log path>"}], "issues": [], "summary": "<one paragraph>"}
+A validation whose success is a non-zero exit (e.g. the CLI must reject bad input with exit 2) adds "expected_exit_code": 2.
+If you need a change to a file you do not own (a contract, .devpipeline/architecture.json \`checks\`, a requirement), add
+ "contract_change_requests": [{"contract": "<file>", "change": "<what should change>", "reason": "<why>"}] — exactly these three keys; it goes to the Software Architect.`
 }
 
 async function resolveConflicts(conflicts) {
@@ -324,8 +327,10 @@ async function schedule(tasks, filter) {
     const st = await mustOp('start-tasks', ['--tasks', ready.join(',')])
     log(`wave: ${ready.join(', ')}`)
     const results = await parallel(st.started.map(s => () => specialist(s.agent, taskPrompt(s), { label: s.task_id })))
+    // status + summary let the coordinator recover a task whose agent finished but did not write its result file
+    // (summary kept short: the whole command line must stay below the Windows 32 KB limit)
     const returned = {}
-    st.started.forEach((s, i) => { returned[s.task_id] = results[i] ? results[i].status : null })
+    st.started.forEach((s, i) => { returned[s.task_id] = results[i] ? { status: results[i].status, summary: String(results[i].summary || '').slice(0, 600) } : null })
     let fin = await mustOp('finish-tasks', ['--tasks', ready.join(','), '--returned-b64', b64json(returned)])
     for (const r of fin.results) if (r.status !== 'COMPLETED') log(`${r.id}: ${r.status}${r.retry ? ' (will retry)' : ''} ${r.errors.join('; ')}`)
     tasks = applyUpdates(tasks, fin.updates)

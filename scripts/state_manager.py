@@ -169,6 +169,7 @@ def create_run(project: Path, mode: str, request: str, profile: str | None = Non
             "base_revision": gitutil.head(project) if gitutil.is_repo(project) else None},
         "gate_results": [], "issue_history": {}, "open_issues": [], "resolved_issues": [], "checkpoints": [],
         "approvals": [], "final_status": None, "stop_reason": None,
+        "cli_overrides": dict(cli_overrides or {}),  # re-applied when resume re-reads config.json
         "usage": {"note": "Token/cost usage is not observable from workflow scripts except budget.spent(); only counters are recorded."},
     }
     errs = validate_named(manifest, "state.schema.json", "/$defs/run")
@@ -233,7 +234,7 @@ def transition(project: Path, run_id: str, to: str, reason: str = "", counters: 
         if limit and to not in cfgmod.state_machine()["terminal"] and to not in ("BLOCKED", "NEEDS_HUMAN_REVIEW", "BUDGET_EXHAUSTED"):
             from dpcore.util import parse_iso
             import datetime as _dt
-            elapsed = (_dt.datetime.now(_dt.timezone.utc) - parse_iso(m["started_at"])).total_seconds() / 60
+            elapsed = (_dt.datetime.now(_dt.timezone.utc) - parse_iso(m.get("resumed_at") or m["started_at"])).total_seconds() / 60
             if elapsed > limit:
                 raise DPError(f"max_runtime_minutes ({limit}) exceeded after {elapsed:.0f} min — stop the run (BUDGET_EXHAUSTED)")
         if to == frm:

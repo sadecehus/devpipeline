@@ -20,7 +20,7 @@ The user asks for an audit, review, health check or security/quality assessment 
 2. **Prepare**:
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/devpipeline.py" prepare --project "<dir>" --mode audit --profile <profile> \
-     --request-file /dev/stdin <<'DEVPIPELINE_REQUEST'
+     --request-file - <<'DEVPIPELINE_REQUEST'
    Audit request: <focus notes or "full audit">
    DEVPIPELINE_REQUEST
    ```
@@ -33,4 +33,4 @@ The user asks for an audit, review, health check or security/quality assessment 
 - QA/reviewer agents are told the run is read-only and the hook guard denies writes outside `.devpipeline/runs/<run>/` during audit runs.
 - An audit ends `COMPLETED` only when no blocking finding exists; otherwise `NEEDS_HUMAN_REVIEW` with the findings.
 
-**If the Workflow tool rejects `scriptPath`** ("must be a script path this tool returned, or a file you can already read"), the plugin folder is outside this session's directories. Copy the script unchanged into the session scratchpad (`cp "<workflow_script>" "<scratchpad>/"`) and pass that copy as `scriptPath`, or pass its full contents via the Workflow `script` input. The script is self-contained; `args.plugin_root` still points the helpers at the plugin.
+**`workflow_script` is a copy inside the project** (`.devpipeline/runs/<run>/workflow/`), so the Workflow tool can load it whenever the project is inside this session's directories. If it still rejects `scriptPath` ("must be a script path this tool returned, or a file you can already read" — the project is outside the session), copy that file unchanged into the session scratchpad and pass the copy as `scriptPath`, or pass its full contents via the Workflow `script` input. The script is self-contained; `args.plugin_root` still points the helpers at the plugin.

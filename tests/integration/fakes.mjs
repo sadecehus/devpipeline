@@ -124,6 +124,11 @@ export function team(opts = {}) {
     }
     if (opts.strayEdit && name === 'backend-engineer') put('AGENTS.md', '# edited by a tool outside ownership\n')
     if (opts.nullFirstAttempt && name === 'backend-engineer' && n === 1) return null   // work written, no result
+    if (opts.noResultFile && name === 'backend-engineer') return { status: 'COMPLETED', summary: 'implemented add (result file not written)' }  // bist-bot TASK-004
+    if (opts.partialRepair && name === 'backend-engineer' && t.kind === 'repair') {  // bist-bot TASK-921-R2: fixed some, blocked on an unowned file
+      return result(info, name, 'PARTIAL', [...new Set(changed)], { blockers: ['e2e check must be declared in architecture.json (not an owned path)'],
+        contract_change_requests: [{ title: 'declare e2e check', summary: 'add a checks[] entry for e2e', file: '.devpipeline/architecture.json' }] })
+    }
     if (opts.sloppyResults) {  // field report: artifacts as strings, missing identity fields, extra validation keys
       const res = { status: 'COMPLETED', changed_files: [...new Set(changed)], artifacts: ['docs/design/index.js'],
         validation: [{ name: 'lint', status: 'PASS', exit_code: 0, evidence: 'logs/x.log' }], summary: 'done' }

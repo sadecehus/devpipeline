@@ -162,9 +162,24 @@
       "dependency_audit": [
         {
           "needs": "pip-audit",
-          "cmd": "pip-audit"
+          "needs_file": "requirements.txt",
+          "cmd": "pip-audit -r requirements.txt"
+        },
+        {
+          "needs": "pip-audit",
+          "needs_file": "pyproject.toml",
+          "cmd": "pip-audit ."
         }
-      ]
+      ],
+      "test_dirs": {
+        "tests/integration": "integration",
+        "tests/api": "api",
+        "tests/contract": "contract",
+        "tests/e2e": "e2e",
+        "e2e": "e2e",
+        "tests/accessibility": "accessibility",
+        "tests/a11y": "accessibility"
+      }
     },
     "maven": {
       "detect": [
@@ -222,5 +237,22 @@
     "ai_eval",
     "performance",
     "custom"
+  ],
+  "supersedable_tools": [
+    "pytest",
+    "pip-audit",
+    "ruff",
+    "mypy",
+    "pyright",
+    "bandit",
+    "osv-scanner",
+    "gitleaks",
+    "semgrep",
+    "trivy",
+    "tsc",
+    "eslint",
+    "jest",
+    "vitest",
+    "playwright"
   ]
 }

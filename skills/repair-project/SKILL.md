@@ -24,7 +24,7 @@ User input: $ARGUMENTS
 5. **Launch** the Workflow tool with `scriptPath` = `workflow_script`, `args` = `workflow_args`.
 6. **Report** which findings were resolved (verified by fresh evidence), which remain, and the integration branch to review/merge.
 
-**If the Workflow tool rejects `scriptPath`** ("must be a script path this tool returned, or a file you can already read"), the plugin folder is outside this session's directories. Copy the script unchanged into the session scratchpad (`cp "<workflow_script>" "<scratchpad>/"`) and pass that copy as `scriptPath`, or pass its full contents via the Workflow `script` input. The script is self-contained; `args.plugin_root` still points the helpers at the plugin.
+**`workflow_script` is a copy inside the project** (`.devpipeline/runs/<run>/workflow/`), so the Workflow tool can load it whenever the project is inside this session's directories. If it still rejects `scriptPath` ("must be a script path this tool returned, or a file you can already read" — the project is outside the session), copy that file unchanged into the session scratchpad and pass the copy as `scriptPath`, or pass its full contents via the Workflow `script` input. The script is self-contained; `args.plugin_root` still points the helpers at the plugin.
 
 ## Rules
 - Repair tasks may only touch the approved findings' affected files; the hook guard enforces the ownership.

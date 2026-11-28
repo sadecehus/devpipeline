@@ -16,7 +16,9 @@ Start with `/devpipeline:project-doctor` (or `python3 scripts/doctor.py --projec
 | `illegal transition X -> Y` | state machine guard | indicates an engine/state mismatch; run `resume` (moves interrupted runs to BLOCKED first) |
 | `COMPLETED refused: code changed after the last passing gate` | files changed after the final gate | resume → verification re-runs on the current revision |
 | Gate `unit_tests` = SKIPPED | skipped tests in a mandatory suite | implement or remove the skip with an approved requirement change; skips never count as pass |
-| Gate = NOT_RUN "no … command discovered" | project lacks the script (e.g. no `test` script) | the owning engineer adds it; DevPipeline never invents script names |
+| Gate = NOT_RUN "no … command discovered" | project lacks the script (e.g. no `test` script) | the owning engineer adds it (package.json script, `tests/<kind>/` pytest suite or `[tool.devpipeline.checks]` in pyproject.toml — see CONFIGURATION.md); DevPipeline never invents script names |
+| Resumed run stops at once with BUDGET_EXHAUSTED | (≤ 0.1.5) limits were copied into the run at prepare time | 0.1.6+: raise `overrides.max_agent_calls` in `.devpipeline/config.json`, resume — it re-reads limits and refuses (starting nothing) while still exhausted |
+| Windows: Playwright MCP "Connection closed" | (≤ 0.1.5) `.mcp.json` started `npx` directly; Windows needs a shell for `npx.cmd` | 0.1.6+: started via `node scripts/mcp_npx.mjs`; check `node --version` and restart Claude Code |
 | `dependency_audit` NOT_RUN | scanner missing / offline | install `pip-audit` etc. if you want it; mandatory only in strict |
 | `ai_evaluation` BLOCKED | strict profile requires live evaluation but no credentials/approval | provide `ANTHROPIC_API_KEY` (or the provider in use) and `RUN_LIVE_AI_TESTS=1`, or use balanced (`live_ai_evaluation: optional`) |
 | `NEEDS_HUMAN_REVIEW: no progress` | same issue fingerprints survived repeated repairs | read the issues in `.devpipeline/runs/<run>/issues/`, decide (requirement change, manual fix), resume |

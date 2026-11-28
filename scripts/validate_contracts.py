@@ -101,8 +101,9 @@ def check_result(result: dict | None, task_id: str | None = None, agent: str | N
         if result["agent"] not in cfgmod.known_agents():
             errors.append(f"unknown agent '{result['agent']}'")
         for v in result["validation"]:
-            if v["status"] == "PASS" and v.get("exit_code") not in (0, None):
-                errors.append(f"validation '{v['name']}' claims PASS with exit code {v['exit_code']}")
+            expected = v.get("expected_exit_code", 0)
+            if v["status"] == "PASS" and v.get("exit_code") is not None and v["exit_code"] != expected:
+                errors.append(f"validation '{v['name']}' claims PASS with exit code {v['exit_code']} (expected_exit_code {expected})")
             if v["status"] == "PASS" and v.get("exit_code") is None and not v.get("evidence_path"):
                 errors.append(f"validation '{v['name']}' claims PASS without exit code or evidence")
         for art in result.get("artifacts", []):

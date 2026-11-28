@@ -9,7 +9,8 @@ Main-session commands:
   prepare      --project DIR --mode build|improve|audit|repair [--request-file F | --request TEXT]
                [--profile P] [--overrides-json JSON] [--new]
   status       --project DIR [--run ID]
-  resume       --project DIR [--run ID] [--approve-note TEXT]
+  resume       --project DIR [--run ID] [--approve-note TEXT] [--retry-failed] [--overrides-json JSON]
+               (re-reads limits from .devpipeline/config.json "overrides"; --request-file - reads stdin)
   version
 
 Workflow operations (always --project DIR --run ID):
@@ -48,7 +49,7 @@ import worktree_manager as wm  # noqa: E402
 QA_KINDS = cfgmod.qa_kinds()
 # Bump when the JSON contract between workflows/*.js and these helpers changes. The plugin is read
 # from its folder, so helpers can be newer than a workflow that is already running.
-PROTOCOL = 2  # single source: config/agent-registry.json report_kind
+PROTOCOL = 3  # single source: config/agent-registry.json report_kind
 DOC_SCOPE = ["*.md", "**/*.md", "docs/", ".env.example", "LICENSE"]
 PLANNING_FILES = ["requirements.json", "PRD.md", "architecture.json", "ARCHITECTURE.md", "tasks.json", "adr/", "contracts/",
                   "acceptance-matrix.md", "contract-changes.json"]
@@ -168,17 +169,41 @@ def op_relay_failure(project: Path, run_id: str, op_key: str, relayed: dict) -> 
     return {"ok": True, "diagnostics": str(path), "differences": len(diffs)}
 
 
+STDIN_NAMES = ("-", "/dev/stdin")  # /dev/stdin does not exist for Windows Python (Git Bash maps it to \\proc\\self\\fd\\0)
+
+
+def read_request_stdin() -> str:
+    data = sys.stdin.buffer.read()
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:  # a Windows console may deliver the code page (e.g. cp1254) instead of UTF-8
+        return data.decode(sys.stdin.encoding or "utf-8", errors="replace")
+
+
+def workflow_copy(project: Path, run_id: str, mode: str) -> tuple[str, str]:
+    """Copy the workflow into the run directory and return (copy, source).
+
+    The Workflow tool only loads scripts from the session's directories; the plugin folder usually is not one of
+    them, the project normally is. The copy also pins the engine version this run was started with."""
+    src = ROOT / "workflows" / f"{mode}-project.js"
+    dst = sm.run_dir(project, run_id) / "workflow" / src.name
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(dst, src.read_text(encoding="utf-8"))
+    return str(dst), str(src)
+
+
 def cmd_prepare(a) -> dict:
     project = P(a.project)
     has_content = project.exists() and any(p for p in project.iterdir() if p.name not in (".devpipeline", ".git", ".DS_Store", ".gitignore"))
+    if a.request_file in STDIN_NAMES:
+        a.request, a.request_file = read_request_stdin(), None
+    if a.request_file and not Path(a.request_file).is_file():
+        raise DPError(f"--request-file {a.request_file} not found (use --request-file - to read the request from stdin)")
     if a.reuse_plan:
         for f in ("requirements.json", "architecture.json", "tasks.json"):
             if not (project / ".devpipeline" / f).exists():
                 raise DPError(f"--reuse-plan: .devpipeline/{f} is missing; run a normal build instead")
-        given = (a.request or "").strip() or (Path(a.request_file).read_text(encoding="utf-8").strip() if a.request_file and a.request_file != "/dev/stdin" and Path(a.request_file).exists() else "")
-        if a.request_file == "/dev/stdin":
-            given = sys.stdin.read().strip()
-            a.request, a.request_file = given, None
+        given = (a.request or "").strip() or (Path(a.request_file).read_text(encoding="utf-8").strip() if a.request_file else "")
         if not given:
             prev = sorted((project / ".devpipeline" / "runs").glob("*/request.txt"), key=lambda p: p.stat().st_mtime)
             if prev:
@@ -198,13 +223,45 @@ def cmd_prepare(a) -> dict:
         raise DPError("repair mode requires --source-run RUN and --issues ISSUE-001,... (user-approved findings)")
     sm.ensure_project(project, created_by_devpipeline=new, profile=a.profile)
     m = sm.create_run(project, a.mode, request, a.profile, overrides, "new" if new else "existing")
-    script = ROOT / "workflows" / f"{a.mode}-project.js"
+    script, source = workflow_copy(project, m["run_id"], a.mode)
     return {"ok": True, "run_id": m["run_id"], "project_dir": str(project), "project_mode": m["project_mode"],
-            "profile": m["config"]["profile"], "workflow_script": str(script),
+            "profile": m["config"]["profile"], "workflow_script": script, "workflow_script_source": source,
             "workflow_args": {"plugin_root": str(ROOT), "project_dir": str(project), "run_id": m["run_id"],
                               "agent_prefix": "devpipeline:", "started_at": m["started_at"], "invocation": _invocation(),
                               **({"reuse_plan": True} if a.reuse_plan else {}),
                               **({"source_run": a.source_run, "issue_ids": issue_ids} if a.mode == "repair" else {})}}
+
+
+# Limits and routing a user may change between a stop and its resume (`.devpipeline/config.json` → overrides).
+# Gate levels, agents and the profile stay as planned: changing them mid-run would change what "done" means.
+REFRESHABLE = ("max_agent_calls", "max_operator_calls", "max_repair_iterations", "max_task_retries", "max_no_progress_iterations",
+               "max_parallel_agents", "max_check_wait_minutes", "max_runtime_minutes", "check_timeout_seconds", "max_output_tokens",
+               "live_ai_evaluation", "auto_accept_assumptions", "model_routing", "effort_routing")
+COUNTER_LIMITS = {"agent_calls": "max_agent_calls", "operator_calls": "max_operator_calls"}
+
+
+def refresh_config(project: Path, run_id: str, resume_overrides: dict) -> dict:
+    """Re-read config.json on resume so raised limits take effect (the manifest holds a snapshot from prepare)."""
+    m = sm.load_manifest(project, run_id)
+    pcfg = read_json(sm.dp_dir(project) / "config.json")
+    project_over = pcfg.get("overrides") or {}
+    if "cli_overrides" in m:  # runs prepared by >= 0.1.6 remember their prepare-time CLI overrides
+        fresh = cfgmod.resolve(m["config"]["profile"], project_over, {**m["cli_overrides"], **resume_overrides})
+        wanted = {k: fresh[k] for k in REFRESHABLE if k in fresh}
+    else:  # older runs: apply only what config.json / this resume set explicitly
+        wanted = {k: v for k, v in {**project_over, **resume_overrides}.items() if k in REFRESHABLE}
+    changed = {k: [m["config"].get(k), v] for k, v in wanted.items() if m["config"].get(k) != v}
+    if changed:
+        candidate = cfgmod._merge(m["config"], {k: v for k, (_, v) in changed.items()})
+        errs = cfgmod.validate_config(candidate)
+        if errs:
+            raise DPError("invalid limits in .devpipeline/config.json overrides: " + "; ".join(errs[:3]))
+        with sm.mutate(project, run_id) as mm:
+            mm["config"] = candidate
+            if resume_overrides:
+                mm["cli_overrides"] = {**mm.get("cli_overrides", {}), **resume_overrides}
+        sm.event(project, run_id, "CONFIG_REFRESHED", detail="; ".join(f"{k}: {old} -> {new}" for k, (old, new) in changed.items())[:500])
+    return {k: v for k, (_, v) in changed.items()}
 
 
 def cmd_resume(a) -> dict:
@@ -212,7 +269,16 @@ def cmd_resume(a) -> dict:
     chk = sm.resume_check(project, a.run)
     if not chk["ok"]:
         return {"ok": False, "error": "; ".join(chk["problems"]), **chk}
+    chk["config_changes"] = refresh_config(project, chk["run_id"], json.loads(a.overrides_json) if a.overrides_json else {})
     m = sm.load_manifest(project, chk["run_id"])
+    spent = [f"{c} {m['counters'].get(c, 0)}/{m['config'][lim]}" for c, lim in COUNTER_LIMITS.items()
+             if m["config"].get(lim) is not None and m["counters"].get(c, 0) >= m["config"][lim]]
+    if spent:
+        return {**chk, "ok": False, "error": f"budget still exhausted ({', '.join(spent)}): raise the limit in "
+                f"{sm.dp_dir(project) / 'config.json'} → \"overrides\": {{\"max_agent_calls\": <higher>}} (or pass "
+                "--overrides-json) and resume again; nothing was started"}
+    with sm.mutate(project, chk["run_id"]) as mm:
+        mm["resumed_at"] = now_iso()  # max_runtime_minutes counts from the latest (re)start, not from the first prepare
     if a.approve_note is not None and m["phase"] == "AWAITING_APPROVAL":
         sm.approve(project, chk["run_id"], a.approve_note or "approved by user")
     if a.retry_failed:
@@ -230,8 +296,8 @@ def cmd_resume(a) -> dict:
     if m["phase"] not in cfgmod.state_machine()["resumable"]:
         # an interrupted run (session ended mid-phase) restarts from a resumable state
         sm.transition(project, chk["run_id"], "BLOCKED", f"interrupted during {m['phase']}; resuming")
-    script = ROOT / "workflows" / f"{m['mode']}-project.js"
-    return {"ok": True, **chk, "workflow_script": str(script),
+    script, source = workflow_copy(project, chk["run_id"], m["mode"])  # refreshed: a resume runs the current engine
+    return {"ok": True, **chk, "workflow_script": script, "workflow_script_source": source,
             "workflow_args": {"plugin_root": str(ROOT), "project_dir": str(project), "run_id": chk["run_id"],
                               "agent_prefix": "devpipeline:", "resume": True, "invocation": _invocation(),
                               **({"source_run": m["repair_scope"]["source_run"], "issue_ids": m["repair_scope"]["issue_ids"]}
@@ -453,11 +519,31 @@ def normalize_result(path: Path, run_id: str, task_id: str, agent: str) -> dict 
         if res.get(key) is None:
             res[key] = []
     res["artifacts"] = [{"path": a} if isinstance(a, str) else a for a in res["artifacts"]]
-    allowed = {"name", "status", "exit_code", "command", "cwd", "evidence_path", "summary"}
+    ccrs = []
+    for c in res.get("contract_change_requests") or []:  # agents write {title|summary|description, file|path, ...}
+        if isinstance(c, str):
+            c = {"change": c}
+        if not isinstance(c, dict):
+            continue
+        pick = lambda *keys: next((str(c[k]) for k in keys if c.get(k) not in (None, "")), "")  # noqa: E731
+        change = pick("change", "summary", "title", "description", "request", "proposal", "details")
+        rest = {k: x for k, x in c.items() if k not in ("contract", "file", "path", "target", "change", "summary", "title", "description",
+                                                       "request", "proposal", "details", "reason", "rationale", "why", "justification")}
+        if rest:
+            change = (change + " " + json.dumps(rest, ensure_ascii=False)).strip()
+        if change:
+            ccrs.append({"contract": pick("contract", "file", "path", "target") or "unspecified", "change": change[:2000],
+                         "reason": pick("reason", "rationale", "why", "justification") or "not given"})
+    if "contract_change_requests" in res:
+        res["contract_change_requests"] = ccrs
+    allowed = {"name", "status", "exit_code", "expected_exit_code", "command", "cwd", "evidence_path", "summary"}
     fixed = []
     for v in res["validation"]:
         if not isinstance(v, dict):
             continue
+        for alias in ("expected_exit", "expected_code", "expected_exit_status", "expected_status_code"):
+            if "expected_exit_code" not in v and isinstance(v.get(alias), int):
+                v["expected_exit_code"] = v.pop(alias)
         extra = {k: v.pop(k) for k in list(v) if k not in allowed}
         if extra:
             ev = extra.get("evidence") or extra.get("log") or extra.get("log_path")
@@ -466,9 +552,16 @@ def normalize_result(path: Path, run_id: str, task_id: str, agent: str) -> dict 
             rest = {k: x for k, x in extra.items() if k not in ("evidence", "log", "log_path")}
             if rest:
                 v["summary"] = (str(v.get("summary", "")) + " " + json.dumps(rest, ensure_ascii=False))[:500].strip()
-        for k in ("evidence_path", "command", "cwd", "summary"):
+        for k in ("evidence_path", "command", "cwd", "summary", "expected_exit_code"):
             if v.get(k) is None:
                 v.pop(k, None)
+        expected = v.get("expected_exit_code", 0)
+        if v.get("status") == "PASS" and isinstance(v.get("exit_code"), int) and v["exit_code"] != expected:
+            # an error-path test ("exits 2 on a bad date") is a PASS with exit 2; without the declared expectation the
+            # claim is unverifiable. Record it as ERROR instead of discarding the whole task (real checks gate later).
+            v["status"] = "ERROR"
+            v["summary"] = (f"coordinator: PASS claimed with exit code {v['exit_code']} but expected_exit_code is "
+                            f"{expected}; " + str(v.get("summary", "")))[:500]
         fixed.append(v)
     res["validation"] = fixed
     issues = []
@@ -483,6 +576,33 @@ def normalize_result(path: Path, run_id: str, task_id: str, agent: str) -> dict 
     return res
 
 
+def salvage_result(project: Path, run_id: str, t: dict, rpath: Path, returned) -> str | None:
+    """Recover a result file the agent did not write where the coordinator reads it.
+
+    1. a file written relative to the agent's worktree (cwd) instead of the absolute result path is moved over;
+    2. otherwise the agent's own structured return value (status + summary, schema-checked by the Workflow tool)
+       becomes a minimal result. It carries no validation claims; the deterministic checks verify the work later.
+    """
+    tid = t["id"]
+    wt = Path(t["worktree"]) if t.get("worktree") else None
+    if wt and wt.exists() and wt.resolve() != project.resolve():
+        for cand in (wt / ".devpipeline" / "runs" / run_id / "agent-results" / f"{tid}.json", wt / "agent-results" / f"{tid}.json",
+                     wt / f"{tid}.json"):
+            if cand.is_file():
+                rpath.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(rpath, cand.read_text(encoding="utf-8", errors="replace"))
+                cand.unlink()
+                return f"result file found in the worktree at {cand.relative_to(wt).as_posix()} and moved to the result path"
+    if isinstance(returned, dict) and returned.get("status") in ("COMPLETED", "FAILED", "BLOCKED", "PARTIAL", "NEEDS_INPUT") \
+            and str(returned.get("summary") or "").strip():
+        atomic_write_json(rpath, {"run_id": run_id, "task_id": tid, "agent": t["agent"], "status": returned["status"],
+                                  "changed_files": [], "validation": [], "issues": [],
+                                  "summary": "[coordinator: the agent returned this result but did not write the result file] "
+                                             + str(returned["summary"])[:3000]})
+        return "result file missing; recorded from the agent's returned status/summary"
+    return None
+
+
 def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) -> dict:
     m = sm.load_manifest(project, run_id)
     cfg = m["config"]
@@ -495,10 +615,15 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
     for tid in ids:
         t = by_id[tid]
         rpath = sm.run_dir(project, run_id) / "agent-results" / f"{tid}.json"
+        ret = returned.get(tid)  # protocol >= 3: {"status", "summary"}; older engines sent the status string
+        if not rpath.exists():
+            how = salvage_result(project, run_id, t, rpath, ret)
+            if how:
+                sm.event(project, run_id, "RESULT_SALVAGED", agent=t["agent"], task_id=tid, detail=how)
         result = normalize_result(rpath, run_id, tid, t["agent"]) if rpath.exists() else None
         check = vc.check_result(result, tid, t["agent"], run_id)
         errors = list(check["errors"])
-        if returned.get(tid) is None and result is None:
+        if ret is None and result is None:
             errors.append("agent returned null (cancelled, API error or stall)")
         ti = {"task_id": tid, "worktree": t.get("worktree"), "base_revision": t.get("base_revision"),
               "snapshot": active.get(tid, {}).get("snapshot")}
@@ -519,8 +644,14 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
             claimed = sorted(set(result["changed_files"]) - set(changed) - set(reverted))
             errors.append(f"result claims changes that do not exist: {claimed[:10]}")
         status = "COMPLETED"
+        partial_note = ""
         if errors:
             status = "FAILED"
+        elif result["status"] == "PARTIAL" and t.get("kind") in ("repair", "contract") and changed:
+            # a repair that fixed part of its issues keeps that work: it is merged, the gate re-evaluates every issue and
+            # the next repair iteration gets what is still open. Retrying it would redo (and lose) the same work.
+            partial_note = "partial repair merged; remaining: " + "; ".join(result.get("blockers", []) or [result["summary"]])[:600]
+            sm.event(project, run_id, "TASK_PARTIAL_MERGED", agent=t["agent"], task_id=tid, detail=partial_note[:300])
         elif result["status"] in ("BLOCKED", "NEEDS_INPUT"):
             status = "BLOCKED"
             errors.append("agent reported " + result["status"] + ": " + "; ".join(result.get("blockers", []))[:300])
@@ -532,7 +663,7 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
             status, retry = "PENDING", True
         t["status"] = status
         t["result_revision"] = fin.get("result_revision") or t.get("result_revision")
-        t["failure_reason"] = "; ".join(errors)[:1000] if errors else ""
+        t["failure_reason"] = "; ".join(errors)[:1000] if errors else partial_note[:1000]
         merged = None
         if status == "COMPLETED" and iso == "worktree":
             mr = wm.merge_task(integ, run_id, tid)
@@ -641,6 +772,7 @@ def _job_paths(project: Path, run_id: str, job: str) -> tuple[Path, Path]:
 
 def op_start_checks(project: Path, run_id: str, label: str, only: str | None, baseline: bool, job: str) -> dict:
     """Start run-checks (or baseline) as a detached process so no single relay waits longer than its Bash limit."""
+    import os
     import subprocess
     meta, result = _job_paths(project, run_id, job)
     if meta.exists():  # idempotent: the same job is never started twice
@@ -648,9 +780,10 @@ def op_start_checks(project: Path, run_id: str, label: str, only: str | None, ba
     cmd = [sys.executable, str(Path(__file__).resolve()), "run-checks-job", "--project", str(project), "--run", run_id,
            "--label", label, "--job", job] + (["--only", only] if only else []) + (["--baseline"] if baseline else [])
     log = meta.with_suffix(".log")
+    detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+              if os.name == "nt" else {"start_new_session": True})  # the job must outlive the relay's shell
     with open(log, "ab") as fh:
-        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                start_new_session=True, close_fds=True)
+        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, close_fds=True, **detach)
     atomic_write_json(meta, {"job": job, "pid": proc.pid, "label": label, "baseline": baseline, "started_at": now_iso()})
     sm.event(project, run_id, "CHECKS_STARTED", detail=f"job {job} ({label}) pid {proc.pid}")
     return {"ok": True, "pending": True, "job": job}
@@ -666,9 +799,34 @@ def op_run_checks_job(project: Path, run_id: str, label: str, only: str | None, 
     return 0
 
 
+def pid_alive(pid: int) -> bool:
+    """Portable liveness test. On Windows os.kill(pid, 0) is not a probe: it TERMINATES the process."""
+    import os
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5  # access denied: exists, owned by someone else
+        try:
+            code = wintypes.DWORD()
+            ok = k32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == 259  # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def op_wait_checks(project: Path, run_id: str, job: str, max_wait: int) -> dict:
     """Block up to max_wait seconds (kept below the relay's 600 s Bash limit) for a check job."""
-    import os
     import time
     meta, result = _job_paths(project, run_id, job)
     if not meta.exists():
@@ -678,16 +836,11 @@ def op_wait_checks(project: Path, run_id: str, job: str, max_wait: int) -> dict:
     while time.monotonic() < deadline:
         if result.exists():
             return {**read_json(result), "pending": False, "job": job}
-        try:
-            if pid:
-                os.kill(pid, 0)
-        except ProcessLookupError:
+        if pid and not pid_alive(pid):
             time.sleep(1)
             if result.exists():
                 return {**read_json(result), "pending": False, "job": job}
             return {"ok": False, "pending": False, "job": job, "error": f"check job {job} exited without a result (see {meta.with_suffix('.log')})"}
-        except PermissionError:
-            pass
         time.sleep(3)
     return {"ok": True, "pending": True, "job": job}
 
@@ -806,12 +959,16 @@ def op_plan_repair(project: Path, run_id: str, iteration: int) -> dict:
                           "kind": "contract", "requirements": sorted({r for i in groups['software-architect'] for r in i.get('requirement_ids', [])}),
                           "dependencies": [], "owned_paths": [], "acceptance_criteria": [], "status": "PENDING", "attempt": 0,
                           "issue_ids": [i["id"] for i in groups["software-architect"]], "repair_iteration": iteration,
-                          "description": "Update contracts under .devpipeline/contracts and record the change in contract-changes.json."})
+                          "description": "Decide each contract change request / requirement issue: update .devpipeline/contracts, "
+                                         "architecture.json (e.g. its `checks`) or requirements as needed, and record every decision "
+                                         "(accepted or rejected, with reason) in contract-changes.json."})
     for n, (agent, items) in enumerate(sorted((k, v) for k, v in groups.items() if k != "software-architect"), start=1):
         owned = sorted({p for t in tasks if t["agent"] == agent and not t["id"].endswith(f"-R{iteration}") for p in t.get("owned_paths", [])})
         for i in items:
             for f in i.get("affected_files", []):
-                if not path_owned(f, owned) and agent in ("integration-engineer", "technical-writer"):
+                # gate issues name the files the fix needs (manifest, test folder): the repair may own them
+                if not path_owned(f, owned) and (agent in ("integration-engineer", "technical-writer")
+                                                 or str(i.get("check_name", "")).startswith("gate:")):
                     owned.append(f)
         if agent == "technical-writer":
             owned = sorted(set(owned) | {"README.md", "docs/", ".env.example"})

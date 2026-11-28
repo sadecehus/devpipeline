@@ -71,10 +71,28 @@ python3 -c "import json,sys;[print(e['ts'][11:19],e['event'],e.get('task_id','')
 - **Tests:** unit `test_secret_scan_precision`.
 - **Lesson:** a gate the agents cannot satisfy without weakening tests is a framework bug — check precision on the real project before blaming agents.
 
-## INC-008 — `scriptPath` rejected when the plugin is outside the session (open, workaround documented)
-- **Observed:** "scriptPath must be a script path this tool returned, or a file you can already read".
+## INC-008 — `scriptPath` rejected when the plugin is outside the session (fixed 0.1.6)
+- **Observed:** "scriptPath must be a script path this tool returned, or a file you can already read" (macOS and Windows).
 - **Root cause:** the Workflow tool only loads scripts from the session's working/added directories; the plugin folder is elsewhere.
-- **Workaround (in the command skills):** copy the generated workflow unchanged into the session scratchpad and launch that copy (or pass it via `script`). Works because workflows are self-contained and `args.plugin_root` points to the helpers.
+- **Fix:** `prepare`/`resume` copy the workflow to `.devpipeline/runs/<run>/workflow/` (inside the project) and return that path. Fallback (project outside the session): copy to the scratchpad or pass via `script`.
+- **Tests:** unit `test_prepare_reads_request_from_stdin_dash_and_copies_workflow`.
+
+## INC-009 … INC-016 — bist-bot on Windows could not reach COMPLETED (0.1.5 → 0.1.6)
+Run `run-20261127-221735-176ccc` (Windows, Git Bash, miniconda, profile fast). One field report, eight framework bugs:
+
+| # | Observed | Root cause | Fix | Test |
+|---|---|---|---|---|
+| 009 | resumed run BUDGET_EXHAUSTED after 10 s; manifest `max_agent_calls: 40`, config.json `80` | limits copied into the manifest at prepare; resume never re-read config.json | `refresh_config` on resume (+ `--overrides-json`), refuse when still exhausted, runtime counted from `resumed_at` | `test_resume_rereads_limits_from_config_json`, `…keeps_prepare_time_cli_overrides` |
+| 010 | secret-scan ERROR "shell metacharacters" | generated command embedded the Windows plugin path (`\`) and was validated like a user command | built-in, argv with `sys.executable` | `test_secret_scan_is_builtin_…` |
+| 011 | `pip-audit` (no args) → 224 vulns in conda/torch | discovered audit had no scope; declared `-r requirements.txt` ran in addition | scoped commands; declared same-tool check supersedes; gate counts declared audits | `test_pip_audit_is_scoped_…` |
+| 012 | integration/e2e/accessibility NOT_RUN in every repair | for Python only architecture.json could declare them, owned by nobody in repair | `[tool.devpipeline.checks]`, `tests/<kind>/` discovery, actionable issue text, repair owns the named files | `test_python_project_can_declare_checks…`, `test_missing_check_issue_says_how…` |
+| 013 | `contract_change_requests[0]: missing 'contract'/'change'; unexpected 'title'` → PARTIAL → FAILED, fix lost | shape never given to agents; CCRs had no consumer; PARTIAL repairs discarded | shape in prompt/contract, normalisation, CCR → architect issue/contract task, partial repairs merged | `test_contract_change_request_*`, integration 27 |
+| 014 | "missing agent result" ×4, a retry each | result file not written / written relative to the worktree | salvage from worktree or from the returned status+summary (protocol 3) | `test_missing_result_is_salvaged`, integration 28 |
+| 015 | "claims PASS with exit code 2" for correct error-path tests | no way to express an expected non-zero exit | `expected_exit_code`; unexplained → ERROR entry, task kept | `test_expected_nonzero_exit_…` |
+| 016 | `code_qa FAIL: "code_qa report PASS"`; bandit "PASS without log evidence" with logs present; Playwright MCP "Connection closed" | failing checks added no note; relative `log_path` resolved against the helper's cwd; `.mcp.json` ran `npx` (a .cmd on Windows) | notes per failing check; evidence resolved vs run dir/worktree/project + `/c/…`; node launcher `scripts/mcp_npx.mjs` | `test_report_gate_reason_…`, `test_relative_log_path_…`, `test_mcp_server_is_started_through_node…` |
+
+Also found while diagnosing (same Windows root): `/dev/stdin` request file (`--request-file -` now); `os.kill(pid, 0)` in `wait-checks` **terminates** a process on Windows (`pid_alive` uses OpenProcess/GetExitCodeProcess); detached job flags; the hook guard's read-only-reviewer check compared a backslash path with `.devpipeline/runs/` and denied reviewers their verdict files; `%TEMP%` scratch root; `python3` missing on PATH.
+- **Lesson:** a repair loop is only as good as the paths a repair agent may touch. For every mandatory gate, ask "which file would fix this, and does any repair task own it?". And run the Windows checklist (paths with `\`, `.cmd` shims, `os.kill`, `/dev/*`, `str(Path)` comparisons) on every new helper.
 
 ## Earlier hardening (independent review before first field use)
 Gate evidence provenance (only coordinator-recorded check reports; QA reports only from the owning agent), unparseable test counts = NOT_RUN, typed approvals, repair-resume, superseded repair tasks, AI evaluation forced by an active ai-engineer, user-checkout change detection, temp-path hook exemption order. See CHANGELOG 0.1.0 "Hardened after independent verification".

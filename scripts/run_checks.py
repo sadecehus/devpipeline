@@ -111,18 +111,63 @@ def discover(root: Path, architecture: dict | None = None) -> list[dict]:
         if any(list(d.glob(g)) for g in st["detect_glob"]):
             for kind, cmd in st["commands"].items():
                 checks.append({"name": f"dotnet:{tag}:{kind}", "kind": kind, "cwd": rel, "command": cmd})
-    def same(a, b):
-        return (a.get("command") or "").split() == (b.get("command") or "").split() and \
-            str(Path(a.get("cwd") or ".")) == str(Path(b.get("cwd") or "."))
-
-    for c in (architecture or {}).get("checks", []):
-        decl = {"command": c["command"], "cwd": c.get("cwd", ".")}
-        checks = [x for x in checks if x["name"] != c["name"] and not same(x, decl)]
-        checks.append({"name": c["name"], "kind": c["kind"], "cwd": c.get("cwd", "."), "command": c["command"],
-                       "timeout": c.get("timeout_seconds"), "declared": True})
-    checks.append({"name": "secret-scan", "kind": "security", "cwd": ".", "builtin": "secret-scan",
-                   "command": f"python3 {shlex.quote(str(SCRIPT_DIR / 'redact_secrets.py'))} scan ."})
+    declared = [{"name": c["name"], "kind": c["kind"], "cwd": c.get("cwd", "."), "command": c["command"],
+                 "timeout": c.get("timeout_seconds"), "declared": "architecture"} for c in (architecture or {}).get("checks", [])]
+    declared += [c for c in checks if c.get("declared") == "project"]  # [tool.devpipeline.checks] in pyproject.toml
+    checks = [c for c in checks if c.get("declared") != "project"]
+    for decl in declared:
+        checks = [x for x in checks if x["name"] != decl["name"] and not _supersedes(decl, x, reg)]
+        checks.append(decl)
+    # built in: runs with the helper's own interpreter, never through the command filter (Windows paths contain '\\')
+    checks.append({"name": "secret-scan", "kind": "security", "cwd": ".", "builtin": "secret-scan", "command": "devpipeline secret-scan ."})
     return checks
+
+
+def _tool(cmd: str | None) -> str | None:
+    """The tool a command runs: `uv run pytest -q` and `python -m pytest x` are both 'pytest'."""
+    try:
+        argv = shlex.split(cmd or "")
+    except ValueError:
+        return None
+    while argv:
+        if argv[0] in ("npx", "bunx"):
+            argv = [a for a in argv[1:] if not a.startswith("-")]
+        elif argv[0] in ("uv", "pnpm", "yarn") and len(argv) > 1 and argv[1] in ("run", "exec", "dlx"):
+            argv = argv[2:]
+        else:
+            break
+    if len(argv) >= 3 and Path(argv[0]).name in ("python", "python3", "py") and argv[1] == "-m":
+        return argv[2]
+    return Path(argv[0]).name if argv else None
+
+
+def _supersedes(decl: dict, found: dict, reg: dict) -> bool:
+    """A declared check replaces a discovered one with the same command, or with the same single-purpose tool,
+    kind and directory (e.g. a declared `pip-audit -r requirements.txt` replaces the generic audit)."""
+    if str(Path(decl.get("cwd") or ".")) != str(Path(found.get("cwd") or ".")):
+        return False
+    if (decl.get("command") or "").split() == (found.get("command") or "").split():
+        return True
+    tool = _tool(decl.get("command"))
+    return bool(tool) and tool in reg.get("supersedable_tools", []) and decl["kind"] == found["kind"] and tool == _tool(found.get("command"))
+
+
+def _pyproject_checks(text: str) -> dict:
+    """`[tool.devpipeline.checks]`: kind = "command" or name = {kind = "...", command = "...", timeout_seconds = N}."""
+    try:
+        import tomllib  # Python >= 3.11
+        return ((tomllib.loads(text).get("tool") or {}).get("devpipeline") or {}).get("checks") or {}
+    except ImportError:
+        pass
+    except Exception:  # noqa: BLE001 - invalid TOML: the project's own tools will report it
+        return {}
+    m = re.search(r"^\[tool\.devpipeline\.checks\]\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    out = {}
+    for line in (m.group(1).splitlines() if m else []):
+        kv = re.match(r"""\s*["']?([A-Za-z0-9_:.-]+)["']?\s*=\s*(["'])(.*)\2\s*(#.*)?$""", line)
+        if kv:
+            out[kv.group(1)] = kv.group(3)
+    return out
 
 
 def _python_checks(d: Path, rel: str, tag: str, st: dict) -> list[dict]:
@@ -158,10 +203,31 @@ def _python_checks(d: Path, rel: str, tag: str, st: dict) -> list[dict]:
         elif kind == "lint" and re.search(r"\bruff\b", deps):
             out.append({"name": f"python:{tag}:lint", "kind": "lint", "cwd": rel, "command": None,
                         "not_run_reason": "ruff declared but not runnable (no uv.lock and no ruff on PATH)"})
-    audit = st["dependency_audit"][0]
-    out.append({"name": f"dependency-audit:python:{tag}", "kind": "security", "cwd": rel,
-                "command": audit["cmd"] if shutil.which(audit["needs"]) else None, "network": True,
-                **({} if shutil.which(audit["needs"]) else {"not_run_reason": "pip-audit not installed (scanner unavailable is NOT a pass)"})})
+    unit_cmd = next((c["command"] for c in out if c["kind"] == "unit" and c.get("command")), None)
+    for sub, kind in st.get("test_dirs", {}).items():  # conventional suites: tests/integration, tests/e2e, ...
+        if (d / sub).is_dir() and any((d / sub).rglob("test*.py")) and not any(c["kind"] == kind for c in out):
+            out.append({"name": f"python:{tag}:{kind}", "kind": kind, "cwd": rel,
+                        "command": f"{unit_cmd} {sub}" if unit_cmd else None,
+                        **({} if unit_cmd else {"not_run_reason": f"{sub} exists but pytest is unavailable"})})
+    kinds = set(cfgmod.stack_registry()["check_kinds"])
+    for key, val in _pyproject_checks(pyproject).items():
+        spec = val if isinstance(val, dict) else {"command": val}
+        kind = spec.get("kind") or key
+        if not isinstance(spec.get("command"), str) or kind not in kinds:
+            out.append({"name": f"python:{tag}:{key}", "kind": kind if kind in kinds else "custom", "cwd": rel, "command": None,
+                        "force_status": "ERROR", "not_run_reason": f"[tool.devpipeline.checks] {key}: needs a command string and a kind in {sorted(kinds)}"})
+            continue
+        out.append({"name": f"python:{tag}:{key}", "kind": kind, "cwd": rel, "command": spec["command"],
+                    "timeout": spec.get("timeout_seconds"), "declared": "project"})
+    audit = next((a for a in st["dependency_audit"] if (d / a["needs_file"]).exists()), None)
+    if not audit:
+        reason = "no requirements.txt or pyproject.toml to scope the audit (an unscoped pip-audit scans the whole interpreter)"
+    elif not shutil.which(audit["needs"]):
+        reason = "pip-audit not installed (scanner unavailable is NOT a pass)"
+    else:
+        reason = None
+    out.append({"name": f"dependency-audit:python:{tag}", "kind": "security", "cwd": rel, "network": True,
+                "command": None if reason else audit["cmd"], **({"not_run_reason": reason} if reason else {})})
     return out
 
 
@@ -223,12 +289,12 @@ def _safe_env() -> dict:
 
 def _validate_command(cmd: str) -> str | None:
     if SHELL_META.search(cmd):
-        return "command contains shell metacharacters; declare a project script instead"
+        return "command contains shell metacharacters (use forward slashes; declare a project script for pipes/redirects)"
     exe = shlex.split(cmd)[0]
     allowed = cfgmod.stack_registry()["allowed_executables"]
     if exe not in allowed:
         return f"executable '{exe}' is not in the allowed list"
-    if not exe.startswith("./") and not shutil.which(exe):
+    if not exe.startswith("./") and not shutil.which(exe) and not (exe in ("python3", "python") and sys.executable):
         return f"executable '{exe}' not found on PATH"
     return None
 
@@ -244,16 +310,22 @@ def execute(check: dict, root: Path, log_dir: Path, label: str, timeout: int, fi
     if check.get("network") and os.environ.get("DEVPIPELINE_OFFLINE") == "1":
         rec.update({"status": "NOT_RUN", "reason": "offline mode (DEVPIPELINE_OFFLINE=1): network check skipped", "exit_code": None})
         return rec
-    problem = _validate_command(check["command"])
-    if problem:
-        rec.update({"status": "NOT_RUN" if "not found" in problem else "ERROR", "reason": problem, "exit_code": None})
-        return rec
+    if check.get("builtin") == "secret-scan":
+        argv = [sys.executable, str(SCRIPT_DIR / "redact_secrets.py"), "scan", "."]
+    else:
+        problem = _validate_command(check["command"])
+        if problem:
+            rec.update({"status": "NOT_RUN" if "not found" in problem else "ERROR", "reason": problem, "exit_code": None})
+            return rec
+        argv = shlex.split(check["command"])
+        if argv[0] in ("python3", "python") and not shutil.which(argv[0]):
+            argv[0] = sys.executable  # Windows/conda often has no python3 on PATH; discovery used this interpreter
     cwd = (root / check["cwd"]).resolve()
     log = log_dir / f"{label}--{re.sub(r'[^A-Za-z0-9_.-]+', '_', check['name'])}.log"
     started = now_iso()
     t0 = time.monotonic()
     try:
-        proc = subprocess.run(shlex.split(check["command"]), cwd=str(cwd), capture_output=True, text=True,
+        proc = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True,
                               timeout=check.get("timeout") or timeout, env=_safe_env(), stdin=subprocess.DEVNULL)
         out = (proc.stdout or "") + ("\n--- stderr ---\n" + proc.stderr if proc.stderr else "")
         code = proc.returncode

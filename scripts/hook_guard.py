@@ -34,6 +34,16 @@ RUN_WRITABLE = ["agent-results/", "test-reports/", "reviews/", "screenshots/", "
 DOC_SCOPE = ["*.md", "**/*.md", "docs/", ".env.example", "LICENSE"]
 TEMP_ROOTS = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
 
+
+def temp_roots() -> tuple[str, ...]:
+    """POSIX temp roots plus the platform temp dir (Windows: %TEMP%), all as POSIX-style prefixes."""
+    import tempfile
+    try:
+        extra = Path(tempfile.gettempdir()).resolve().as_posix().rstrip("/") + "/"
+    except OSError:
+        return TEMP_ROOTS
+    return TEMP_ROOTS + (extra,)
+
 UNSAFE = [
     (r"\bgit\s+push\b", "pushing to remotes is never automatic"),
     (r"\bgit\s+reset\s+--hard\b", "destructive git reset"),
@@ -141,7 +151,7 @@ def check_write(agent: str, file_path: str, project: Path, act: dict) -> str | N
     try:
         rel = fp.relative_to(project.resolve()).as_posix()
     except ValueError:
-        if any(str(fp).startswith(t) for t in TEMP_ROOTS):
+        if any(fp.as_posix().startswith(t) for t in temp_roots()):
             return None  # scratch files outside the project (never inside it)
         return f"{agent} may not write outside the project ({fp})"
     if rel.startswith(".devpipeline/"):
@@ -363,7 +373,8 @@ def main(argv: list[str]) -> int:
             elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
                 target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
                 why = check_write(agent, target, project, act) if target else None
-                if why is None and agent in READ_ONLY_AGENTS and ".devpipeline/runs/" not in str(Path(target).resolve()):
+                # as_posix: on Windows str() has backslashes, which denied reviewers their own verdict files
+                if why is None and agent in READ_ONLY_AGENTS and ".devpipeline/runs/" not in Path(target).resolve().as_posix():
                     why = f"{agent} is read-only"
             else:
                 why = None
