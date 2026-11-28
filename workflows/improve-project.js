@@ -351,6 +351,17 @@ Only integration glue may change here; route feature defects as issues to their 
   }
 }
 
+async function checks(label, baseline) {
+  // checks can take longer than one relay may wait (Bash limit 600 s): start a detached job, then wait in <=9 min slices
+  const job = `${String(DP.invocation || 'inv').replace(/[^A-Za-z0-9]/g, '')}-${label.replace(/[^A-Za-z0-9-]/g, '')}`
+  const extra = ['--label', q(label), '--job', job].concat(baseline ? ['--baseline'] : [])
+  let st = await mustOp('start-checks', extra)
+  const slices = Math.max(2, Math.ceil(((CFG.max_check_wait_minutes || 180) * 60) / 540))
+  for (let i = 0; st.pending && i < slices; i++) st = await mustOp('wait-checks', ['--job', job, '--max-wait', '540'])
+  if (st.pending) throw new StopRun('BLOCKED', `checks '${label}' still running after ${CFG.max_check_wait_minutes || 180} min (a test runner may be in watch mode or a server never exits); see ${P().run_dir}/ops/jobs/${job}.log`)
+  return st
+}
+
 function qaPrompt(name, fp, mode) {
   const kind = QA_KIND[name]
   const path = `${P().run_dir}/test-reports/${kind}.json`
@@ -385,13 +396,13 @@ Write the verdict (schema review.schema.json, "kind": "${kind}") to ${path} with
 
 async function verification(mode, label) {
   await to('TESTING', label)
-  const pre = await mustOp('run-checks', ['--label', q(`${label}-pre`)])
+  const pre = await checks(`${label}-pre`)
   if (mode !== 'audit' && pre.selected_agents) CTX.selected_agents = pre.selected_agents
   for (const a of pre.added_agents || []) log(`activated ${a}: AI functionality detected in code`)
   const qa = (CTX.selected_agents || []).filter(a => QA_KIND[a])
   await qaFanout(qa, pre.prod_fingerprint, mode)
   if (mode !== 'audit') await mustOp('commit-integration', ['--scope', 'qa', '--message', q(`devpipeline(${DP.run_id}): QA tests ${label}`)])
-  const post = await mustOp('run-checks', ['--label', q(`${label}-post`)])
+  const post = await checks(`${label}-post`)
   log(`checks: ${post.status}${post.failing.length ? ' — failing: ' + post.failing.join(', ') : ''}`)
   await to('REVIEWING', label)
   if ((CTX.selected_agents || []).indexOf('code-reviewer') >= 0) {
@@ -484,7 +495,7 @@ async function runPipeline(mode) {
         gate.passed ? 'audit found no blocking issues' : `audit findings: ${gate.blocking_issue_ids.join(', ') || gate.failing_mandatory.join(', ')}`)
     }
     if ((mode === 'improve' || mode === 'repair') && !done('baseline')) {
-      const b = await mustOp('baseline')
+      const b = await checks('baseline', true)
       log(`baseline: ${b.status}${b.failing.length ? ' — pre-existing failures: ' + b.failing.join(', ') : ''}`)
       await markStep('baseline')
     }

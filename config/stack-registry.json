@@ -111,8 +111,8 @@
       "run": "{pm} run {script}",
       "tsc_fallback": "npx --no-install tsc --noEmit",
       "dependency_audit": {
-        "npm": "npm audit --audit-level=high",
-        "pnpm": "pnpm audit --audit-level high"
+        "npm": "npm audit --audit-level=high --omit=dev",
+        "pnpm": "pnpm audit --audit-level high --prod"
       }
     },
     "python": {

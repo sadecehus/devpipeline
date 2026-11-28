@@ -28,8 +28,14 @@ PATTERNS = [
     ("url_credentials", re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s:/@]+:[^\s@/]{3,}@[^\s]+", re.I)),
 ]
 ASSIGNMENT = re.compile(
-    r"(?i)\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY)[A-Z0-9_]*)\s*[=:]\s*[\"']?([^\s\"'#]{8,})"
+    r"(?i)\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY)[A-Z0-9_]*)[\"']?[ \t]*(?:=|:|=>)[ \t]*(?P<q>[\"'`]?)(?P<v>[^\s\"'`#,;)}]{8,})(?P=q)"
 )
+PLACEHOLDER_WORDS = re.compile(r"(?i)(test|fake|dummy|mock|example|sample|placeholder|changeme|redacted|xxxx|localdev|not-a-real)")
+# lowercase identifiers with separators ("instagram:token-status:v1") are names/keys, not random secrets;
+# random lowercase hex has no separators and stays flagged
+SLUG = re.compile(r"^(?=.*[._:/-])(?:[a-z][a-z0-9._:/-]*|[A-Za-z][A-Za-z._:/-]*)$")  # also "instagram.tokenStatusCache"
+CONFIG_SUFFIXES = {".env", ".ini", ".toml", ".yaml", ".yml", ".properties", ".cfg", ".conf", ".json"}
+TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|e2e|mocks?|__mocks__|fixtures?|evals?|testdata)(/|$)|\.(test|spec)\.[A-Za-z0-9]+$")
 PLACEHOLDER = re.compile(r"(?i)^(?:<.*>|\$\{.*\}|\$[A-Z_]+|x{4,}|\*{4,}|changeme|change-me|example|placeholder|your[-_].*|dummy.*|test.*|fake.*|redacted.*|none|null|todo|\.\.\.)$")
 SKIP_DIRS = {".git", "node_modules", ".devpipeline", ".venv", "venv", "dist", "build", ".next", "__pycache__", "target", "coverage"}
 SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".lock", ".woff", ".woff2", ".ttf", ".mp4", ".sqlite", ".db"}
@@ -42,18 +48,27 @@ def _entropy(s: str) -> float:
     return -sum(n / len(s) * math.log2(n / len(s)) for n in freq.values())
 
 
-def find(text: str) -> list[dict]:
+def find(text: str, rel_path: str | None = None) -> list[dict]:
+    """Secret candidates. Strong key formats are reported everywhere; the name=value heuristic only
+    for literal values outside test/mock/fixture paths (and unquoted only in config/env files)."""
     hits = []
     for name, rx in PATTERNS:
         for m in rx.finditer(text):
             hits.append({"type": name, "start": m.start(), "end": m.end()})
+    if rel_path and TEST_PATH.search(rel_path):
+        return hits
+    config_like = rel_path is None or Path(rel_path).suffix.lower() in CONFIG_SUFFIXES or Path(rel_path).name.startswith(".env")
     for m in ASSIGNMENT.finditer(text):
-        value = m.group(2)
-        if PLACEHOLDER.match(value) or value.lower().startswith(("process.env", "os.environ", "env(", "getenv")):
+        value, quoted = m.group("v"), bool(m.group("q"))
+        if not quoted and not config_like:
+            continue  # `tokenHash = sha256(x)` / `secrets = loadSecrets()` are code, not literals
+        if PLACEHOLDER.match(value) or PLACEHOLDER_WORDS.search(value):
             continue
-        if _entropy(value) < 3.0:
+        if value.lower().startswith(("process.env", "os.environ", "env(", "getenv", "${", "$")):
             continue
-        hits.append({"type": "assignment:" + m.group(1), "start": m.start(2), "end": m.end(2)})
+        if _entropy(value) < 3.0 or SLUG.match(value):
+            continue
+        hits.append({"type": "assignment:" + m.group(1), "start": m.start("v"), "end": m.end("v")})
     return hits
 
 
@@ -91,7 +106,7 @@ def scan(root: Path) -> list[dict]:
             text = f.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for h in find(text):
+        for h in find(text, rel):
             line = text.count("\n", 0, h["start"]) + 1
             findings.append({"file": rel, "line": line, "type": h["type"]})
         if f.name == ".env" or (f.name.startswith(".env.") and f.name not in (".env.example", ".env.sample", ".env.template")):

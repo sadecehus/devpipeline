@@ -54,9 +54,10 @@ async function runSmoke() {
   await to('PLANNING', 'runtime smoke: large relay')
   const plan = await mustOp('validate-plan')
   const ctx2 = await mustOp('context')
+  const chk = await checks('smoke')
   const r = await specialist('orchestrator', 'Runtime smoke test of DevPipeline agent resolution. Do not use any tools. Return status COMPLETED with summary exactly "agentType resolved".', { label: 'smoke:orchestrator' })
   const out = await finalize('CANCELLED', 'runtime smoke test finished')
-  return { context_phase_seen: CTX.phase, transition_ok: t.ok, requirements_valid: req.valid, plan_valid: plan.valid, plan_tasks: plan.tasks.length, plan_agents: plan.selected_agents.length, context_tasks: ctx2.tasks.length, specialist: r, final_status: out.final_status, operator_calls: counters.operator_calls, agent_calls: counters.agent_calls }
+  return { context_phase_seen: CTX.phase, transition_ok: t.ok, requirements_valid: req.valid, plan_valid: plan.valid, plan_tasks: plan.tasks.length, plan_agents: plan.selected_agents.length, context_tasks: ctx2.tasks.length, checks_report: chk.report, checks_ok: chk.ok, specialist: r, final_status: out.final_status, operator_calls: counters.operator_calls, agent_calls: counters.agent_calls }
 }
 return await runSmoke()
 """

@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Past field incidents with root causes and fixes: [INCIDENTS.md](INCIDENTS.md).
+
 Start with `/devpipeline:project-doctor` (or `python3 scripts/doctor.py --project <dir>`), then `/devpipeline:project-status`.
 
 | Symptom | Cause | Fix |

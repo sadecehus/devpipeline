@@ -111,8 +111,13 @@ def discover(root: Path, architecture: dict | None = None) -> list[dict]:
         if any(list(d.glob(g)) for g in st["detect_glob"]):
             for kind, cmd in st["commands"].items():
                 checks.append({"name": f"dotnet:{tag}:{kind}", "kind": kind, "cwd": rel, "command": cmd})
+    def same(a, b):
+        return (a.get("command") or "").split() == (b.get("command") or "").split() and \
+            str(Path(a.get("cwd") or ".")) == str(Path(b.get("cwd") or "."))
+
     for c in (architecture or {}).get("checks", []):
-        checks = [x for x in checks if x["name"] != c["name"]]
+        decl = {"command": c["command"], "cwd": c.get("cwd", ".")}
+        checks = [x for x in checks if x["name"] != c["name"] and not same(x, decl)]
         checks.append({"name": c["name"], "kind": c["kind"], "cwd": c.get("cwd", "."), "command": c["command"],
                        "timeout": c.get("timeout_seconds"), "declared": True})
     checks.append({"name": "secret-scan", "kind": "security", "cwd": ".", "builtin": "secret-scan",

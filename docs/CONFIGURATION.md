@@ -48,6 +48,7 @@ Validate with `python3 scripts/validate_config.py --project <dir>`.
 | `max_repair_iterations` | correction rounds after initial verification |
 | `max_task_retries` | extra attempts for a failed task (invalid/missing result, ownership violation) |
 | `max_no_progress_iterations` | consecutive iterations an issue fingerprint may survive before NEEDS_HUMAN_REVIEW |
+| `max_check_wait_minutes` | total time the workflow waits for one check run (detached job, waited in ≤ 9 min slices) |
 | `max_output_tokens` | optional ceiling checked against `budget.spent()` (output tokens of the turn) — a soft guard, not billing |
 | `require_plan_approval` | stop at AWAITING_APPROVAL after planning (strict: true) |
 | `auto_accept_assumptions` | accept blocking questions that have `default_if_unanswered` |

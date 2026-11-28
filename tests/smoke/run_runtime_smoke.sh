@@ -34,6 +34,13 @@ tasks = [{"id": f"TASK-{i:03d}", "agent": agents[i % 4], "title": f"Implement fe
     "components": [], "ownership": [{"agent": a, "paths": [t["owned_paths"][0] for t in tasks if t["agent"] == a]} for a in agents],
     "required_agents": agents, "test_strategy": {}, "adrs": []}))
 PLAN
+# a check that outlives the operator call that starts it (detached job + bounded waits)
+WT="$WORK/project"
+printf 'setTimeout(() => {}, 20000)\n' > "$WT/slow.js"
+printf '{"name":"s","version":"1.0.0","scripts":{"test":"node slow.js"}}' > "$WT/package.json"
+printf '{"name":"s","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"s","version":"1.0.0"}}}' > "$WT/package-lock.json"
+printf 'audit=false\nfund=false\n' > "$WT/.npmrc"
+(cd "$WT" && git add -A >/dev/null 2>&1 && git -c user.name=s -c user.email=s@s commit -qm smoke >/dev/null 2>&1 || true)
 OUT="$(cd "$ROOT" && claude -p --model sonnet --settings '{"enableWorkflows": true}' \
   --allowedTools "Workflow" "Bash(python3 *)" "Read" -- \
   "Use the Workflow tool exactly once with scriptPath \"$ROOT/tests/smoke/runtime-smoke.js\" and args set to this JSON object (as an object, not a string): $ARGS . When the workflow returns, print its return value as compact JSON and nothing else. If the Workflow tool is unavailable, say exactly why.")"
@@ -48,6 +55,7 @@ checks = {
     "workflow ran and finalized": res.get("final_status") == "CANCELLED",
     "operator relay verified (>= 6 ops incl. large outputs)": res.get("operator_calls", 0) >= 6,
     "large relays exact (12 tasks via validate-plan and context)": res.get("plan_valid") is True and res.get("plan_tasks") == 12 and res.get("context_tasks") == 12,
+    "detached check job survived its starting relay": res.get("checks_ok") is True and res.get("checks_report") == "test-reports/checks-smoke.json",
     "plugin agent resolved via agentType": (res.get("specialist") or {}).get("status") == "COMPLETED",
     "hooks received agent_type for workflow agents": '"source": "hook"' in events and "orchestrator" in events,
 }

@@ -224,6 +224,20 @@ class RedactionTests(unittest.TestCase):
         self.assertNotIn("Zx81kq0PpLm3Rt7vWy2b", out)
         self.assertIn("[REDACTED:", out)
 
+    def test_secret_scan_precision(self):
+        real = 'API_KEY = "Zx81kq0PpLm3Rt7vWy2bQ9"\n'
+        self.assertEqual(len(redact_secrets.find(real, "src/config.ts")), 1)
+        self.assertEqual(len(redact_secrets.find("API_KEY=Zx81kq0PpLm3Rt7vWy2bQ9\n", ".env.example")), 1)
+        self.assertEqual(len(redact_secrets.find('SECRET = "a3f9c01b7d2e4f5a6b8c9d0e1f2a3b4c"', "src/x.ts")), 1)
+        self.assertGreaterEqual(len(redact_secrets.find("k = 'sk-ant-api03-" + "a" * 40 + "'", "tests/x.ts")), 1)
+        for text, path in ((real, "tests/mocks/env.ts"), (real, "src/a.test.ts"),
+                           ("const tokenHash = sha256(token)\n", "src/a.ts"),
+                           ("const secrets = loadSecrets(config)\n", "src/a.ts"),
+                           ("INSTAGRAM_ACCESS_TOKEN=\nBASE_URL=https://graph.example.com/v21\n", ".env.example"),
+                           ('export const TOKEN_CACHE_KEY = "instagram.tokenStatusCache";\n', "src/a.ts"),
+                           ('const TEST_TOKEN = "test-token-1234567890abcdef"\n', "src/a.ts")):
+            self.assertEqual(redact_secrets.find(text, path), [], (text, path))
+
     def test_placeholders_not_flagged(self):
         self.assertEqual(redact_secrets.find("API_KEY=changeme\nTOKEN=${TOKEN}\nPASSWORD=<your-password>"), [])
 

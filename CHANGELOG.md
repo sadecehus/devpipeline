@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 — 2026-11-28
+### Fixed (istanbul-reels resume ended BLOCKED in run-checks)
+- Check runs (≈450–570 s here) no longer have to fit into one relayed Bash call (600 s limit): `start-checks` launches a detached job and `wait-checks` waits in ≤ 9 min slices up to `max_check_wait_minutes` (default 180); a stuck suite ends BLOCKED with the job log path. Verified in the real runtime (a 20 s check outlived the relay that started it).
+- Architect-declared checks replace discovered checks with the same command and directory (e2e, integration, accessibility … ran twice).
+- Secret scan precision (76 false positives → 0 on the project, real keys still caught): name=value heuristic only for literal values, unquoted only in env/config files, not in test/mock/fixture paths; no matching across line breaks; identifier-like names and placeholder words ignored. Strong key formats (sk-ant-, AKIA, ghp_, private keys …) are still reported everywhere.
+- Runtime dependency audit checks production dependencies (`npm audit --omit=dev`, `pnpm audit --prod`); dev-tool advisories no longer block.
+
 ## 0.1.4 — 2026-11-28
 ### Fixed (istanbul-reels run ended BLOCKED without a report)
 - `finalize` was denied by the hook guard: the stop reason (with the orchestrator's advice, `… | recovery advice: …`) is passed single-quoted, but the guard flagged the quoted `|`. The guard now scans only text outside single quotes (quote-aware, handles `'\''`).

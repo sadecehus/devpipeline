@@ -99,7 +99,7 @@ The plugin adds roughly 4.8k tokens of skill/agent descriptions to every session
 
 ## Development of the framework
 ```bash
-python3 -m unittest discover -s tests/unit        # 86 deterministic unit tests
+python3 -m unittest discover -s tests/unit        # 89 deterministic unit tests
 node --test tests/integration/                    # 26 mocked end-to-end workflow scenarios (real helpers, fake agents)
 python3 -m unittest discover -s tests/smoke       # example projects: activation + gates
 python3 scripts/validate_config.py && claude plugin validate .
@@ -108,7 +108,7 @@ tests/smoke/run_runtime_smoke.sh                  # real Claude Code runtime (sm
 Edit `scripts/workflow_src/engine.js` then `python3 scripts/build_workflows.py`; edit `docs/AGENT_CONTRACT.md` then `python3 scripts/sync_agent_contract.py`. Extension guide: [docs/EXTENDING.md](docs/EXTENDING.md).
 
 ## Troubleshooting
-See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md); start with `/devpipeline:project-doctor`.
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) and the incident log [docs/INCIDENTS.md](docs/INCIDENTS.md); start with `/devpipeline:project-doctor`.
 
 ## Update and uninstall
 ```bash

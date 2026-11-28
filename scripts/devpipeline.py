@@ -264,7 +264,7 @@ def op_context(project: Path, run_id: str) -> dict:
                  integration_worktree=src.get("integration_worktree"), qa_write_paths=pcfg.get("qa_write_paths", []),
                  protected_paths=pcfg.get("protected_paths", []), phase=m["phase"])
     cfg = m["config"]
-    keep = ["profile", "max_parallel_agents", "max_agent_calls", "max_operator_calls", "max_repair_iterations",
+    keep = ["profile", "max_parallel_agents", "max_check_wait_minutes", "max_agent_calls", "max_operator_calls", "max_repair_iterations",
             "max_task_retries", "max_no_progress_iterations", "max_output_tokens", "require_plan_approval",
             "auto_accept_assumptions", "live_ai_evaluation", "viewports", "model_routing", "effort_routing"]
     tasks = load_tasks(project, run_id)
@@ -633,6 +633,65 @@ def op_run_checks(project: Path, run_id: str, label: str, only: str | None) -> d
             "count": len(res["checks"])}
 
 
+def _job_paths(project: Path, run_id: str, job: str) -> tuple[Path, Path]:
+    d = sm.run_dir(project, run_id) / "ops" / "jobs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{job}.json", d / f"{job}.result.json"
+
+
+def op_start_checks(project: Path, run_id: str, label: str, only: str | None, baseline: bool, job: str) -> dict:
+    """Start run-checks (or baseline) as a detached process so no single relay waits longer than its Bash limit."""
+    import subprocess
+    meta, result = _job_paths(project, run_id, job)
+    if meta.exists():  # idempotent: the same job is never started twice
+        return {"ok": True, "pending": not result.exists(), "job": job}
+    cmd = [sys.executable, str(Path(__file__).resolve()), "run-checks-job", "--project", str(project), "--run", run_id,
+           "--label", label, "--job", job] + (["--only", only] if only else []) + (["--baseline"] if baseline else [])
+    log = meta.with_suffix(".log")
+    with open(log, "ab") as fh:
+        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                start_new_session=True, close_fds=True)
+    atomic_write_json(meta, {"job": job, "pid": proc.pid, "label": label, "baseline": baseline, "started_at": now_iso()})
+    sm.event(project, run_id, "CHECKS_STARTED", detail=f"job {job} ({label}) pid {proc.pid}")
+    return {"ok": True, "pending": True, "job": job}
+
+
+def op_run_checks_job(project: Path, run_id: str, label: str, only: str | None, baseline: bool, job: str) -> int:
+    meta, result = _job_paths(project, run_id, job)
+    try:
+        out = op_baseline(project, run_id) if baseline else op_run_checks(project, run_id, label, only)
+    except Exception as exc:  # noqa: BLE001 - recorded for the waiting workflow
+        out = {"ok": False, "error": f"check job crashed: {exc}"[:800]}
+    atomic_write_json(result, out)
+    return 0
+
+
+def op_wait_checks(project: Path, run_id: str, job: str, max_wait: int) -> dict:
+    """Block up to max_wait seconds (kept below the relay's 600 s Bash limit) for a check job."""
+    import os
+    import time
+    meta, result = _job_paths(project, run_id, job)
+    if not meta.exists():
+        return {"ok": False, "error": f"unknown check job {job}"}
+    deadline = time.monotonic() + max(5, min(max_wait, 540))
+    pid = read_json(meta).get("pid")
+    while time.monotonic() < deadline:
+        if result.exists():
+            return {**read_json(result), "pending": False, "job": job}
+        try:
+            if pid:
+                os.kill(pid, 0)
+        except ProcessLookupError:
+            time.sleep(1)
+            if result.exists():
+                return {**read_json(result), "pending": False, "job": job}
+            return {"ok": False, "pending": False, "job": job, "error": f"check job {job} exited without a result (see {meta.with_suffix('.log')})"}
+        except PermissionError:
+            pass
+        time.sleep(3)
+    return {"ok": True, "pending": True, "job": job}
+
+
 def op_commit_integration(project: Path, run_id: str, scope: str, message: str) -> dict:
     m = sm.load_manifest(project, run_id)
     integ = Path(m["source"]["integration_worktree"])
@@ -935,6 +994,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--status")
     ap.add_argument("--awaiting", choices=["questions", "plan"])
     ap.add_argument("--op-key")
+    ap.add_argument("--job")
+    ap.add_argument("--max-wait", type=int, default=540)
+    ap.add_argument("--baseline", action="store_true")
     ap.add_argument("--protocol", type=int)
     ap.add_argument("--relayed-b64")
     ap.add_argument("--source-run")
@@ -961,6 +1023,8 @@ def main(argv: list[str]) -> int:
                          f"DevPipeline was updated while this run was in progress (workflow protocol {a.protocol}, helpers {PROTOCOL}). "
                          "Nothing was changed; resume the run to continue with the updated workflow."})
         legacy = a.protocol is None  # workflows from before the handshake expect full task lists
+        if a.command == "run-checks-job":  # internal: executed by the detached process, not by the relay
+            return op_run_checks_job(project, a.run, a.label, a.only, a.baseline, a.job or "")
         if a.command == "relay-failure":
             return emit(op_relay_failure(project, a.run, a.op_key or "", decode_b64_json(a.relayed_b64, {})))
         cache = None
@@ -988,6 +1052,8 @@ def main(argv: list[str]) -> int:
             "verify-merge": lambda: op_verify_merge(project, a.run, ids),
             "integration-status": lambda: op_integration_status(project, a.run),
             "run-checks": lambda: op_run_checks(project, a.run, a.label, a.only),
+            "start-checks": lambda: op_start_checks(project, a.run, a.label, a.only, a.baseline, a.job or ""),
+            "wait-checks": lambda: op_wait_checks(project, a.run, a.job or "", a.max_wait),
             "commit-integration": lambda: op_commit_integration(project, a.run, a.scope or "integration", a.message),
             "validate-reports": lambda: op_validate_reports(project, a.run, [x for x in a.expect.split(",") if x]),
             "gate": lambda: quality_gate.evaluate(project, a.run),

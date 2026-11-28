@@ -391,6 +391,35 @@ class VerifierRegressionTests(unittest.TestCase):
         self.assertTrue(vc.check_result(res, "TASK-013", "frontend-engineer", "run-1")["valid"], vc.check_result(res)["errors"])
         self.assertFalse(res["issues"][0]["blocking"])
 
+    def test_declared_check_dedupes_identical_discovered_check(self):
+        from helpers import node_project
+        d = tmpdir()
+        node_project(d)
+        checks = run_checks.discover(d, {"checks": [{"name": "unit", "kind": "unit", "command": "npm run test"}]})
+        self.assertEqual([c["name"] for c in checks if c["kind"] == "unit"], ["unit"])
+
+    def test_long_checks_run_as_detached_job_with_bounded_waits(self):
+        import devpipeline as dpm
+        f = GateFixture()
+        write(f.wt / "slow.js", "setTimeout(() => {}, 9000)\n")
+        pkg = read_json(f.wt / "package.json")
+        pkg["scripts"]["test:integration"] = "node slow.js"
+        write(f.wt / "package.json", pkg)
+        start = dpm.op_start_checks(f.project, f.run, "slow", None, False, "inv-slow")
+        self.assertTrue(start["pending"])
+        self.assertEqual(dpm.op_start_checks(f.project, f.run, "slow", None, False, "inv-slow")["job"], "inv-slow")  # idempotent
+        first = dpm.op_wait_checks(f.project, f.run, "inv-slow", 5)
+        self.assertTrue(first["pending"], "a slice returns before the relay limit")
+        res = first
+        for _ in range(10):
+            res = dpm.op_wait_checks(f.project, f.run, "inv-slow", 30)
+            if not res["pending"]:
+                break
+        self.assertFalse(res["pending"])
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["report"], "test-reports/checks-slow.json")
+        self.assertIn("test-reports/checks-slow.json", sm.load_manifest(f.project, f.run)["check_reports"])
+
     def test_ai_engineer_task_forces_ai_evaluation(self):
         from dpcore.selection import select_agents
         sel = [s["agent"] for s in select_agents({"backend": True}, "balanced", "build", ["ai-engineer"], ["ai-engineer"])["selected"]]
