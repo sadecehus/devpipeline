@@ -99,8 +99,8 @@ The plugin adds roughly 4.8k tokens of skill/agent descriptions to every session
 
 ## Development of the framework
 ```bash
-python3 -m unittest discover -s tests/unit        # 84 deterministic unit tests
-node --test tests/integration/                    # 24 mocked end-to-end workflow scenarios (real helpers, fake agents)
+python3 -m unittest discover -s tests/unit        # 86 deterministic unit tests
+node --test tests/integration/                    # 26 mocked end-to-end workflow scenarios (real helpers, fake agents)
 python3 -m unittest discover -s tests/smoke       # example projects: activation + gates
 python3 scripts/validate_config.py && claude plugin validate .
 tests/smoke/run_runtime_smoke.sh                  # real Claude Code runtime (small usage): relay, checksum, agentType, hooks

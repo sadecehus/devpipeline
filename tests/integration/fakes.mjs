@@ -122,6 +122,8 @@ export function team(opts = {}) {
     } else {
       for (const pth of t.owned_paths) put(pth.endsWith('/') ? pth + 'index.js' : pth, `// ${t.title} (attempt ${n})\nmodule.exports = {}\n`)
     }
+    if (opts.strayEdit && name === 'backend-engineer') put('AGENTS.md', '# edited by a tool outside ownership\n')
+    if (opts.nullFirstAttempt && name === 'backend-engineer' && n === 1) return null   // work written, no result
     if (opts.sloppyResults) {  // field report: artifacts as strings, missing identity fields, extra validation keys
       const res = { status: 'COMPLETED', changed_files: [...new Set(changed)], artifacts: ['docs/design/index.js'],
         validation: [{ name: 'lint', status: 'PASS', exit_code: 0, evidence: 'logs/x.log' }], summary: 'done' }

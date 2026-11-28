@@ -94,7 +94,9 @@ async function op(cmd, extra) {
   OP_SEQ++
   // the op key makes the helper idempotent: a relay retry returns the recorded result instead of re-running the operation
   const key = `${String(DP.invocation || 'inv').replace(/[^A-Za-z0-9]/g, '')}-${OP_SEQ}-${cmd}`
-  const parts = ['python3', q(DP.plugin_root + '/scripts/devpipeline.py'), cmd, '--project', q(DP.project_dir), '--run', q(DP.run_id), '--op-key', key, '--protocol', String(PROTOCOL)].concat(extra || [])
+  const base = ['python3', q(DP.plugin_root + '/scripts/devpipeline.py'), cmd, '--project', q(DP.project_dir), '--run', q(DP.run_id), '--op-key', key, '--protocol', String(PROTOCOL)]
+  if (cmd !== 'transition') base.push('--counters-b64', b64json(counters))
+  const parts = base.concat(extra || [])
   const command = parts.join(' ')
   let lastRelayed = null
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -286,7 +288,7 @@ function taskPrompt(s) {
   return header(s.task_id, s.worktree, s.result_path) + `\n
 Your task: ${s.task_id} "${s.title}" (attempt ${s.attempt}). Read its full definition in ${P().run_dir}/tasks.json.
 Owned paths (only these may change): ${JSON.stringify(s.owned_paths)}
-${repair ? `This is a REPAIR task for issues ${s.issue_ids.join(', ')} — read each in ${P().run_dir}/issues/<ID>.json. Fix root causes; never weaken tests, remove requirements or change contracts to make checks pass.\n` : ''}${s.kind === 'contract' ? `Contract task: update ${P().contracts}/ and append the change with reason to ${P().dp}/contract-changes.json; do not edit application code.\n` : ''}${s.failure_reason ? `Previous attempt was rejected: ${s.failure_reason}\n` : ''}Do not commit — the coordinator commits your worktree and merges it. Finish by writing the agent-result JSON to the result path and returning it.
+${repair ? `This is a REPAIR task for issues ${s.issue_ids.join(', ')} — read each in ${P().run_dir}/issues/<ID>.json. Fix root causes; never weaken tests, remove requirements or change contracts to make checks pass.\n` : ''}${s.kind === 'contract' ? `Contract task: update ${P().contracts}/ and append the change with reason to ${P().dp}/contract-changes.json; do not edit application code.\n` : ''}${s.failure_reason ? `Previous attempt was rejected: ${s.failure_reason}\n` : ''}${s.previous_attempt_branch ? `The previous attempt's work is preserved on branch ${s.previous_attempt_branch}. Reuse it instead of starting over: inspect \`git diff HEAD ${s.previous_attempt_branch} -- <owned paths>\` and restore what is correct with \`git checkout ${s.previous_attempt_branch} -- <path>\` (only inside your owned paths), then fix what was rejected.\n` : ''}Do not commit — the coordinator commits your worktree and merges it. Finish by writing the agent-result JSON to the result path and returning it.
 Required shape (schema ${P().schemas}/agent-result.schema.json — no extra keys):
 {"run_id": "${DP.run_id}", "task_id": "${s.task_id}", "agent": "${s.agent}", "status": "COMPLETED", "requirements": [], "changed_files": ["<path>"], "artifacts": [{"path": "<file>", "kind": "doc"}],
  "validation": [{"name": "unit", "status": "PASS", "exit_code": 0, "command": "<cmd>", "evidence_path": "<log path>"}], "issues": [], "summary": "<one paragraph>"}`

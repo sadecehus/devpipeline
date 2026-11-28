@@ -35,5 +35,7 @@ The user wants features added, behaviour changed or a refactor done in an existi
 - A baseline check run distinguishes pre-existing failures; they are reported, never claimed as fixed unless they actually pass.
 - Non-git projects run with serialised tasks and content-snapshot change detection (reduced isolation; reported in the run).
 
+**If the Workflow tool rejects `scriptPath`** ("must be a script path this tool returned, or a file you can already read"), the plugin folder is outside this session's directories. Copy the script unchanged into the session scratchpad (`cp "<workflow_script>" "<scratchpad>/"`) and pass that copy as `scriptPath`, or pass its full contents via the Workflow `script` input. The script is self-contained; `args.plugin_root` still points the helpers at the plugin.
+
 ## Fallback
 Without the Workflow tool, follow `${CLAUDE_PLUGIN_ROOT}/docs/WORKFLOWS.md` § "Fallback mode" and state the reduced guarantees.

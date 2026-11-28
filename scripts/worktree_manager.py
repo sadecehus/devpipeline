@@ -126,13 +126,38 @@ def create_task(project: Path, run_id: str, task_id: str, integration: str, isol
         return {"task_id": task_id, "worktree": str(integration), "branch": None, "base_revision": None, "snapshot": str(snap_path)}
     base = gitutil.head(Path(integration))
     path = wt_root(project, run_id) / task_id
+    branch = branch_for(run_id, task_id)
+    previous = None
     if path.exists():
+        _commit_all(path, f"devpipeline({run_id}): {task_id} unfinished attempt (preserved)")
         gitutil.git(project, "worktree", "remove", "--force", str(path))  # our own previous attempt
-    gitutil.git(project, "worktree", "add", "-q", "-B", branch_for(run_id, task_id), str(path), base)
-    return {"task_id": task_id, "worktree": str(path), "branch": branch_for(run_id, task_id), "base_revision": base}
+    old = gitutil.git(project, "rev-parse", "--verify", "-q", branch, check=False).stdout.strip()
+    if old and old != base and gitutil.git(project, "merge-base", "--is-ancestor", old, base, check=False).returncode != 0:
+        n = 1
+        while gitutil.git(project, "rev-parse", "--verify", "-q", f"{branch}-attempt{n}", check=False).returncode == 0:
+            n += 1
+        previous = f"{branch}-attempt{n}"
+        gitutil.git(project, "branch", previous, old)  # never lose an attempt's work
+    gitutil.git(project, "worktree", "add", "-q", "-B", branch, str(path), base)
+    return {"task_id": task_id, "worktree": str(path), "branch": branch, "base_revision": base, "previous_attempt_branch": previous}
 
 
-def finish_task(project: Path, run_id: str, task: dict, isolation: str) -> dict:
+def revert_paths(worktree: Path, base: str, paths: list[str]) -> list[str]:
+    """Undo changes to the given paths in a task worktree (restore from base, delete if new)."""
+    reverted = []
+    for rel in paths:
+        exists_in_base = gitutil.git(worktree, "cat-file", "-e", f"{base}:{rel}", check=False).returncode == 0
+        if exists_in_base:
+            gitutil.git(worktree, "checkout", base, "--", rel, check=False)
+        else:
+            f = worktree / rel
+            if f.is_file() or f.is_symlink():
+                f.unlink()
+        reverted.append(rel)
+    return reverted
+
+
+def finish_task(project: Path, run_id: str, task: dict, isolation: str, allowed: list[str] | None = None) -> dict:
     """Commit a task's work on its branch; return the actually changed files."""
     if isolation != "worktree":
         before = read_json(task["snapshot"])
@@ -143,8 +168,15 @@ def finish_task(project: Path, run_id: str, task: dict, isolation: str) -> dict:
     if not wt.exists():
         return {"changed_files": [], "result_revision": None, "error": "worktree missing"}
     changed = gitutil.changed_files(wt, task["base_revision"])
+    reverted = []
+    if allowed is not None:
+        from dpcore.dag import path_owned
+        outside = [f for f in changed if not path_owned(f, allowed)]
+        if outside:
+            reverted = revert_paths(wt, task["base_revision"], outside)
+            changed = gitutil.changed_files(wt, task["base_revision"])
     rev = _commit_all(wt, f"devpipeline({run_id}): {task['task_id']}") or gitutil.head(wt)
-    return {"changed_files": changed, "result_revision": rev}
+    return {"changed_files": changed, "result_revision": rev, "reverted": reverted}
 
 
 def merge_task(integration: Path, run_id: str, task_id: str) -> dict:

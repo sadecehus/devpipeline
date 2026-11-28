@@ -18,11 +18,14 @@ User input: $ARGUMENTS
 4. For BLOCKED / NEEDS_HUMAN_REVIEW / BUDGET_EXHAUSTED: show `stop_reason`; resuming only helps if the blocker was resolved (credentials provided, environment fixed, limits raised in `.devpipeline/config.json` `overrides`). Ask the user to confirm the blocker is resolved.
 5. **Validate and prepare the resume**:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/devpipeline.py" resume --project "<dir>" [--run <RUN_ID>] [--approve-note "<note>"]
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/devpipeline.py" resume --project "<dir>" [--run <RUN_ID>] [--approve-note "<note>"] [--retry-failed]
    ```
+   Add `--retry-failed` when tasks are FAILED/BLOCKED and the user wants them attempted again (ask first). Each retried task gets a fresh bounded retry budget, and its previous attempts stay on `devpipeline/<run>/<TASK>-attemptN` branches; the agent is told to reuse that work.
    It checks project identity, detects external changes to the integration worktree, resets interrupted RUNNING tasks to PENDING, marks stale reports and returns `workflow_script` + `workflow_args`. If `ok` is false, show `error`/`problems` and stop. Report `external_changes` to the user before continuing.
 6. **Relaunch** with the Workflow tool: `scriptPath` = `workflow_script`, `args` = `workflow_args`. Completed steps (analysis, planning, finished tasks) are skipped; stale evidence is re-generated.
 7. Report the outcome from the run's final-report.md.
+
+**If the Workflow tool rejects `scriptPath`** ("must be a script path this tool returned, or a file you can already read"), the plugin folder is outside this session's directories. Copy the script unchanged into the session scratchpad (`cp "<workflow_script>" "<scratchpad>/"`) and pass that copy as `scriptPath`, or pass its full contents via the Workflow `script` input. The script is self-contained; `args.plugin_root` still points the helpers at the plugin.
 
 ## Notes
 - Within the same Claude Code session you can alternatively resume a paused/killed workflow run natively from `/workflows`; the DevPipeline resume above also works across sessions because state lives in `.devpipeline/`.

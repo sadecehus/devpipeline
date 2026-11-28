@@ -196,6 +196,27 @@ def check_write(agent: str, file_path: str, project: Path, act: dict) -> str | N
     return f"{agent} must work inside its assigned worktree, not the user's checkout ({rel})"
 
 
+def _outside_single_quotes(command: str) -> str:
+    """The parts of a POSIX shell command that are NOT inside single quotes (backslash escapes outside
+    quotes are consumed), so literal text such as a quoted reason with '|' is not mistaken for an operator."""
+    out, i, n = [], 0, len(command)
+    while i < n:
+        ch = command[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "'":
+            end = command.find("'", i + 1)
+            if end < 0:
+                return command  # unbalanced quote: treat everything as unquoted (deny path)
+            i = end + 1
+            out.append(" ")
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def is_devpipeline_helper(command: str) -> bool:
     """`python3 <devpipeline plugin root>/scripts/<helper>.py args...` and nothing else.
 
@@ -204,7 +225,8 @@ def is_devpipeline_helper(command: str) -> bool:
     """
     import shlex
 
-    if re.search(r"[;&|`<>]|\$\(", command):
+    unquoted = _outside_single_quotes(command)  # the engine single-quotes every free-text argument
+    if re.search(r"[;&|`<>\n]|\$\(|\$\{", unquoted):
         return False
     try:
         argv = shlex.split(command)

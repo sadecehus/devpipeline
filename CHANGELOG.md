@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.4 — 2026-11-28
+### Fixed (istanbul-reels run ended BLOCKED without a report)
+- `finalize` was denied by the hook guard: the stop reason (with the orchestrator's advice, `… | recovery advice: …`) is passed single-quoted, but the guard flagged the quoted `|`. The guard now scans only text outside single quotes (quote-aware, handles `'\''`).
+- TASK-013 was discarded three times for framework reasons, not for its work:
+  - results with `evidence_path: null` or free-text `issues` are normalised (strings become non-blocking issues);
+  - edits outside owned paths (here `AGENTS.md`) are reverted in the task worktree and reported (`OWNERSHIP_REVERTED`) instead of failing the whole task;
+  - every earlier attempt is preserved on `devpipeline/<run>/<TASK>-attemptN` and the next attempt is told to reuse it.
+- Counters are persisted on every helper call (the manifest showed `agent_calls: 1` after 68 agents).
+### Added
+- `resume --retry-failed`: a user-approved fresh, still bounded, retry budget for FAILED/BLOCKED tasks.
+- Command skills explain how to launch when `scriptPath` is outside the session; `--reuse-plan` with an empty request reuses the earlier request.
+
 ## 0.1.3 — 2026-11-28
 ### Fixed
 - `undefined is not an object (evaluating 'tasks.filter')`: a workflow started with an older engine received the new delta-only `finish-tasks` output because the plugin is read from its source folder and the helpers changed mid-run. Workflows and helpers now exchange a protocol version on every call; a mismatch stops the run `BLOCKED` before anything changes (resume relaunches the current workflow). Helpers still return full task lists to pre-handshake workflows.

@@ -90,6 +90,13 @@ class HookGuardTests(unittest.TestCase):
         self.assertEqual(self.bash("pipeline-operator", "ls -la"), "deny")
         self.assertEqual(self.bash("pipeline-operator", ok + " ; rm -rf /"), "deny")
 
+    def test_operator_quoted_metacharacters_are_literal(self):
+        ok = f"python3 '{ROOT}/scripts/devpipeline.py' finalize --project '/x' --run 'r' --status BLOCKED --reason 'tasks not completed: T=FAILED | recovery advice: a; b > c $(x)'"
+        self.assertEqual(self.bash("pipeline-operator", ok), "allow")
+        self.assertEqual(self.bash("pipeline-operator", ok + " | sh"), "deny")
+        self.assertEqual(self.bash("pipeline-operator", f"python3 '{ROOT}/scripts/devpipeline.py' gate $(rm -rf /)"), "deny")
+        self.assertEqual(self.bash("pipeline-operator", f"python3 '{ROOT}/scripts/devpipeline.py' gate --reason 'it'\\''s fine | ok'"), "allow")
+
     def test_audit_mode_read_only(self):
         act = json.loads((self.project / ".devpipeline/active.json").read_text())
         act["mode"] = "audit"

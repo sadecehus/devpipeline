@@ -175,10 +175,14 @@ def cmd_prepare(a) -> dict:
         for f in ("requirements.json", "architecture.json", "tasks.json"):
             if not (project / ".devpipeline" / f).exists():
                 raise DPError(f"--reuse-plan: .devpipeline/{f} is missing; run a normal build instead")
-        if not a.request and not a.request_file:
-            prev = sorted((project / ".devpipeline" / "runs").glob("*/request.txt"))
+        given = (a.request or "").strip() or (Path(a.request_file).read_text(encoding="utf-8").strip() if a.request_file and a.request_file != "/dev/stdin" and Path(a.request_file).exists() else "")
+        if a.request_file == "/dev/stdin":
+            given = sys.stdin.read().strip()
+            a.request, a.request_file = given, None
+        if not given:
+            prev = sorted((project / ".devpipeline" / "runs").glob("*/request.txt"), key=lambda p: p.stat().st_mtime)
             if prev:
-                a.request_file = str(prev[-1])
+                a.request, a.request_file = None, str(prev[-1])
     if a.new and has_content:
         raise DPError(f"{project} already contains files; refusing to scaffold a new project over it — use improve mode")
     new = not has_content
@@ -211,6 +215,18 @@ def cmd_resume(a) -> dict:
     m = sm.load_manifest(project, chk["run_id"])
     if a.approve_note is not None and m["phase"] == "AWAITING_APPROVAL":
         sm.approve(project, chk["run_id"], a.approve_note or "approved by user")
+    if a.retry_failed:
+        tasks = load_tasks(project, chk["run_id"])
+        retried = []
+        for t in tasks:
+            if t["status"] in ("FAILED", "BLOCKED") and not str(t.get("failure_reason", "")).startswith("superseded"):
+                t["status"], t["attempt"] = "PENDING", 0
+                retried.append(t["id"])
+        if retried:
+            save_tasks(project, chk["run_id"], tasks)
+            sync_task_map(project, chk["run_id"], tasks)
+            sm.event(project, chk["run_id"], "TASKS_RETRIED", detail=f"user-approved retry: {retried}")
+        chk["retried_tasks"] = retried
     if m["phase"] not in cfgmod.state_machine()["resumable"]:
         # an interrupted run (session ended mid-phase) restarts from a resumable state
         sm.transition(project, chk["run_id"], "BLOCKED", f"interrupted during {m['phase']}; resuming")
@@ -372,6 +388,8 @@ def op_start_tasks(project: Path, run_id: str, ids: list[str]) -> dict:
             t["branch"], t["base_revision"] = info["branch"], info["base_revision"]
         if info.get("snapshot"):
             t["_snapshot"] = info["snapshot"]
+        if info.get("previous_attempt_branch"):
+            t["failure_reason"] = (t.get("failure_reason", "") + f" | previous attempt preserved on branch {info['previous_attempt_branch']}")[:1000]
         result_path = sm.run_dir(project, run_id) / "agent-results" / f"{tid}.json"
         if result_path.exists():
             result_path.rename(result_path.with_suffix(f".attempt{t['attempt'] - 1}.json"))
@@ -379,7 +397,8 @@ def op_start_tasks(project: Path, run_id: str, ids: list[str]) -> dict:
         started.append({"task_id": tid, "agent": t["agent"], "title": relay_text(t["title"], 120), "worktree": info["worktree"],
                         "result_path": str(result_path), "owned_paths": t.get("owned_paths", []), "attempt": t["attempt"],
                         "kind": t.get("kind", "implementation"), "issue_ids": t.get("issue_ids", []),
-                        "failure_reason": relay_text(t.get("failure_reason", ""), 300)})
+                        "failure_reason": relay_text(t.get("failure_reason", ""), 300),
+                        "previous_attempt_branch": info.get("previous_attempt_branch")})
         sm.event(project, run_id, "TASK_STARTED", agent=t["agent"], task_id=tid, detail=f"attempt {t['attempt']}")
     save_tasks(project, run_id, [{k: v for k, v in t.items() if not k.startswith("_")} for t in tasks])
     # snapshots for serial mode are kept in active.json (not part of task schema)
@@ -447,8 +466,19 @@ def normalize_result(path: Path, run_id: str, task_id: str, agent: str) -> dict 
             rest = {k: x for k, x in extra.items() if k not in ("evidence", "log", "log_path")}
             if rest:
                 v["summary"] = (str(v.get("summary", "")) + " " + json.dumps(rest, ensure_ascii=False))[:500].strip()
+        for k in ("evidence_path", "command", "cwd", "summary"):
+            if v.get(k) is None:
+                v.pop(k, None)
         fixed.append(v)
     res["validation"] = fixed
+    issues = []
+    for n, i in enumerate(res["issues"], start=1):
+        if isinstance(i, str):  # free-text notes become non-blocking, schema-valid issues
+            i = {"id": f"ISSUE-{900 + n:03d}", "source_agent": agent, "assigned_agent": agent, "severity": "low",
+                 "category": "functional", "description": i[:2000], "blocking": False, "status": "OPEN"}
+        if isinstance(i, dict):
+            issues.append(i)
+    res["issues"] = issues
     atomic_write_json(path, res)
     return res
 
@@ -472,14 +502,21 @@ def op_finish_tasks(project: Path, run_id: str, ids: list[str], returned: dict) 
             errors.append("agent returned null (cancelled, API error or stall)")
         ti = {"task_id": tid, "worktree": t.get("worktree"), "base_revision": t.get("base_revision"),
               "snapshot": active.get(tid, {}).get("snapshot")}
-        fin = wm.finish_task(project, run_id, ti, iso) if t.get("worktree") else {"changed_files": []}
-        changed = fin.get("changed_files", [])
         allowed = t.get("owned_paths", []) + t.get("shared_paths", [])
+        fin = wm.finish_task(project, run_id, ti, iso, allowed if iso == "worktree" else None) if t.get("worktree") else {"changed_files": []}
+        changed = fin.get("changed_files", [])
+        reverted = fin.get("reverted", [])
+        if reverted:  # the task keeps its legitimate work; the stray edits are undone and reported
+            warnings_ = f"reverted changes outside owned paths: {reverted[:10]}"
+            with sm.mutate(project, run_id) as mm:
+                mm.setdefault("ownership_reverted", {}).setdefault(tid, [])
+                mm["ownership_reverted"][tid] = sorted(set(mm["ownership_reverted"][tid]) | set(reverted))
+            sm.event(project, run_id, "OWNERSHIP_REVERTED", agent=t["agent"], task_id=tid, detail=warnings_)
         outside = [f for f in changed if not path_owned(f, allowed)]
-        if outside:
+        if outside:  # serial mode (no worktree) cannot revert safely
             errors.append(f"ownership violation: changed files outside owned paths: {outside[:10]}")
-        if result and set(result.get("changed_files", [])) - set(changed) and iso == "worktree":
-            claimed = sorted(set(result["changed_files"]) - set(changed))
+        if result and set(result.get("changed_files", [])) - set(changed) - set(reverted) and iso == "worktree":
+            claimed = sorted(set(result["changed_files"]) - set(changed) - set(reverted))
             errors.append(f"result claims changes that do not exist: {claimed[:10]}")
         status = "COMPLETED"
         if errors:
@@ -881,6 +918,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--overrides-json")
     ap.add_argument("--new", action="store_true")
     ap.add_argument("--reuse-plan", action="store_true")
+    ap.add_argument("--retry-failed", action="store_true")
     ap.add_argument("--approve-note")
     ap.add_argument("--to")
     ap.add_argument("--reason", default="")
@@ -933,8 +971,12 @@ def main(argv: list[str]) -> int:
             if cache.exists():  # a relay retry: return the recorded result, never execute an operation twice
                 write_stdout(cache.read_text().strip())
                 return 0
+        seen = decode_b64_json(a.counters_b64, {}) if a.command != "transition" else {}
         with sm.mutate(project, a.run) as mm:
             mm["counters"]["operator_calls"] += 1
+            for k, v in seen.items():
+                if k in mm["counters"] and isinstance(v, int) and v > mm["counters"][k]:
+                    mm["counters"][k] = v
         ops = {
             "context": lambda: op_context(project, a.run),
             "transition": lambda: op_transition(project, a.run, a),

@@ -381,6 +381,16 @@ class VerifierRegressionTests(unittest.TestCase):
         g = write(d / "g.json", {"task_id": "TASK-009", "status": "COMPLETED", "summary": "s"})
         self.assertFalse(vc.check_result(dpm.normalize_result(g, "run-1", "TASK-001", "backend-engineer"), "TASK-001")["valid"])
 
+    def test_normalisation_null_evidence_and_string_issues(self):
+        import devpipeline as dpm
+        import validate_contracts as vc
+        f = write(tmpdir() / "r.json", {"status": "COMPLETED", "changed_files": [], "summary": "s",
+                                         "validation": [{"name": "e2e", "status": "FAIL", "exit_code": 1, "evidence_path": None}],
+                                         "issues": ["publish spec failed on mobile", "a11y timeout"]})
+        res = dpm.normalize_result(f, "run-1", "TASK-013", "frontend-engineer")
+        self.assertTrue(vc.check_result(res, "TASK-013", "frontend-engineer", "run-1")["valid"], vc.check_result(res)["errors"])
+        self.assertFalse(res["issues"][0]["blocking"])
+
     def test_ai_engineer_task_forces_ai_evaluation(self):
         from dpcore.selection import select_agents
         sel = [s["agent"] for s in select_agents({"backend": True}, "balanced", "build", ["ai-engineer"], ["ai-engineer"])["selected"]]

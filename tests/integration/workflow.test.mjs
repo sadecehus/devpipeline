@@ -3,6 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runWorkflow, py, Killed } from './harness.mjs'
@@ -349,4 +350,37 @@ test('24. --reuse-plan continues from an earlier run\'s validated plan without r
   assert.equal(second.result.final_status, 'COMPLETED', second.result.reason)
   assert.equal(t.counts.analyst, 1)
   assert.equal(t.counts.architect, 1)
+})
+
+test('25. an edit outside owned paths is reverted and reported instead of discarding the task (istanbul-reels TASK-013)', async () => {
+  const dir = newProject()
+  const prep = prepare(dir)
+  const { fakes, counts } = team({ strayEdit: true })
+  const out = await runWorkflow('build-project.js', prep.workflow_args, fakes)
+  assert.equal(out.result.final_status, 'COMPLETED', out.result.reason)
+  assert.equal(counts['backend-engineer:TASK-001'], 1)
+  assert.ok(!existsSync(join(dir, 'AGENTS.md')), 'stray file not merged')
+  assert.deepEqual(manifest(dir, prep.run_id).ownership_reverted['TASK-001'], ['AGENTS.md'])
+  assert.match(readFileSync(join(dir, '.devpipeline', 'runs', prep.run_id, 'events.jsonl'), 'utf8'), /OWNERSHIP_REVERTED/)
+})
+
+test('26. a retried attempt gets the previous attempt preserved on a branch; resume --retry-failed grants a fresh budget', async () => {
+  const dir = newProject()
+  const prep = prepare(dir)
+  const prompts = []
+  const t = team({ nullFirstAttempt: true })
+  const wrapped = { ...t.fakes, 'backend-engineer': async (p, o, info) => { prompts.push(p); return t.fakes['backend-engineer'](p, o, info) } }
+  const out = await runWorkflow('build-project.js', prep.workflow_args, wrapped)
+  assert.equal(out.result.final_status, 'COMPLETED', out.result.reason)
+  assert.match(prompts[1], /preserved on branch devpipeline\/.+\/TASK-001-attempt1/)
+  const branches = spawnSync('git', ['-C', dir, 'branch', '--list', '*TASK-001-attempt*'], { encoding: 'utf8' }).stdout
+  assert.match(branches, /TASK-001-attempt1/)
+  // separate run: retries exhausted, then a user-approved retry
+  const dir2 = newProject()
+  const p2 = prepare(dir2)
+  const failing = await runWorkflow('build-project.js', p2.workflow_args, team({ nullResult: true }).fakes)
+  assert.equal(failing.result.final_status, 'NEEDS_HUMAN_REVIEW')
+  const r = py(['resume', '--project', dir2, '--retry-failed'])
+  assert.equal(r.ok, true, r.error)
+  assert.deepEqual(r.retried_tasks, ['TASK-001'])
 })
